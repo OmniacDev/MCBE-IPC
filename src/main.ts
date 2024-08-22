@@ -24,11 +24,12 @@ export namespace IPC {
     }
     server.world.getDimension('overworld').runCommand(`/scriptevent ipc:invoke ${JSON.stringify(data)}`)
     return new Promise(resolve => {
-      server.system.afterEvents.scriptEventReceive.subscribe(event => {
+      const event_listener = server.system.afterEvents.scriptEventReceive.subscribe(event => {
         if (event.id === 'ipc:handle') {
           const handle_data = JSON.parse(event.message) as HandleEventData
           if (handle_data.channel === channel) {
             resolve(handle_data.args)
+            server.system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
           }
         }
       })
