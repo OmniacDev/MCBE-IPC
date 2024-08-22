@@ -1,4 +1,4 @@
-# MCBE-IPC
+# MCBE-IPC📡
 
 An Experimental IPC[^1] system for MCBE Script API projects
 
