@@ -1,0 +1,19 @@
+{
+  "name": "mcbe-ipc",
+  "author": "OmniacDev",
+  "description": "Experimental IPC system for MCBE Script API projects",
+  "license": "Apache-2.0",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "format": "prettier --write src"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "prettier": "^3.3.3",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "@minecraft/server": "^1.13.0"
+  }
+}
