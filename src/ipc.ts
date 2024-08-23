@@ -71,7 +71,9 @@ export namespace IPC {
             channel: channel,
             args: args
           }
-          server.world.getDimension('overworld').runCommand(`scriptevent ipc:handle ${JSON.stringify(data)}`)
+          server.system.run(() => {
+            server.world.getDimension('overworld').runCommand(`scriptevent ipc:handle ${JSON.stringify(data)}`)
+          })
         }
       }
     })
@@ -83,7 +85,9 @@ export namespace IPC {
       channel: channel,
       args: args
     }
-    server.world.getDimension('overworld').runCommand(`scriptevent ipc:send ${JSON.stringify(data)}`)
+    server.system.run(() => {
+      server.world.getDimension('overworld').runCommand(`scriptevent ipc:send ${JSON.stringify(data)}`)
+    })
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
