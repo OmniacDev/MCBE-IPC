@@ -22,7 +22,7 @@ export namespace IPC {
       channel: channel,
       args: args
     }
-    server.world.getDimension('overworld').runCommand(`/scriptevent ipc:invoke ${JSON.stringify(data)}`)
+    server.world.getDimension('overworld').runCommand(`scriptevent ipc:invoke ${JSON.stringify(data)}`)
     return new Promise(resolve => {
       const event_listener = server.system.afterEvents.scriptEventReceive.subscribe(event => {
         if (event.id === 'ipc:handle') {
@@ -47,7 +47,7 @@ export namespace IPC {
             channel: channel,
             args: args
           }
-          server.world.getDimension('overworld').runCommand(`/scriptevent ipc:handle ${JSON.stringify(data)}`)
+          server.world.getDimension('overworld').runCommand(`scriptevent ipc:handle ${JSON.stringify(data)}`)
         }
       }
     })
@@ -59,7 +59,7 @@ export namespace IPC {
       channel: channel,
       args: args
     }
-    server.world.getDimension('overworld').runCommand(`/scriptevent ipc:send ${JSON.stringify(data)}`)
+    server.world.getDimension('overworld').runCommand(`scriptevent ipc:send ${JSON.stringify(data)}`)
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
