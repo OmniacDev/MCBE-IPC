@@ -66,7 +66,7 @@ export namespace IPC {
       if (event.id === 'ipc:invoke') {
         const invoke_data = JSON.parse(event.message) as InvokeEventData
         if (invoke_data.channel === channel) {
-          const args = listener(invoke_data.args)
+          const args = listener(...invoke_data.args)
           const data: HandleEventData = {
             channel: channel,
             args: args
@@ -96,7 +96,7 @@ export namespace IPC {
       if (event.id === 'ipc:send') {
         const send_data = JSON.parse(event.message) as SendEventData
         if (send_data.channel === channel) {
-          listener(send_data.args)
+          listener(...send_data.args)
         }
       }
     })
@@ -108,7 +108,7 @@ export namespace IPC {
       if (event.id === 'ipc:send') {
         const send_data = JSON.parse(event.message) as SendEventData
         if (send_data.channel === channel) {
-          listener(send_data.args)
+          listener(...send_data.args)
           server.system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
         }
       }
