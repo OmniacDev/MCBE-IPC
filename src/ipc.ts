@@ -25,24 +25,14 @@
 import * as server from '@minecraft/server'
 
 export namespace IPC {
-  export type InvokeEventData = {
-    channel: string
-    args: any[]
-  }
-
-  export type HandleEventData = {
-    channel: string
-    args: any[]
-  }
-
-  export type SendEventData = {
+  export type EventData = {
     channel: string
     args: any[]
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke(channel: string, ...args: any[]): Promise<any> {
-    const data: InvokeEventData = {
+    const data: EventData = {
       channel: channel,
       args: args
     }
@@ -50,7 +40,7 @@ export namespace IPC {
     return new Promise(resolve => {
       const event_listener = server.system.afterEvents.scriptEventReceive.subscribe(event => {
         if (event.id === 'ipc:handle') {
-          const handle_data = JSON.parse(event.message) as HandleEventData
+          const handle_data = JSON.parse(event.message) as EventData
           if (handle_data.channel === channel) {
             resolve(handle_data.args)
             server.system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
@@ -64,10 +54,10 @@ export namespace IPC {
   export function handle(channel: string, listener: (...args: any[]) => any) {
     server.system.afterEvents.scriptEventReceive.subscribe(event => {
       if (event.id === 'ipc:invoke') {
-        const invoke_data = JSON.parse(event.message) as InvokeEventData
+        const invoke_data = JSON.parse(event.message) as EventData
         if (invoke_data.channel === channel) {
           const args = listener(...invoke_data.args)
-          const data: HandleEventData = {
+          const data: EventData = {
             channel: channel,
             args: args
           }
@@ -81,7 +71,7 @@ export namespace IPC {
 
   /** Sends a message with `args` to `channel` */
   export function send(channel: string, ...args: any[]): void {
-    const data: SendEventData = {
+    const data: EventData = {
       channel: channel,
       args: args
     }
@@ -94,7 +84,7 @@ export namespace IPC {
   export function on(channel: string, listener: (...args: any[]) => void) {
     server.system.afterEvents.scriptEventReceive.subscribe(event => {
       if (event.id === 'ipc:send') {
-        const send_data = JSON.parse(event.message) as SendEventData
+        const send_data = JSON.parse(event.message) as EventData
         if (send_data.channel === channel) {
           listener(...send_data.args)
         }
@@ -106,7 +96,7 @@ export namespace IPC {
   export function once(channel: string, listener: (...args: any[]) => void) {
     const event_listener = server.system.afterEvents.scriptEventReceive.subscribe(event => {
       if (event.id === 'ipc:send') {
-        const send_data = JSON.parse(event.message) as SendEventData
+        const send_data = JSON.parse(event.message) as EventData
         if (send_data.channel === channel) {
           listener(...send_data.args)
           server.system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
