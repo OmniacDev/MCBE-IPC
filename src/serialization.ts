@@ -1,4 +1,4 @@
-const MAX_STR_SIZE = 4096
+const MAX_STR_SIZE = 2048
 let ID = 0
 
 type ChunkData = [number, number, string] | [number, number, string, boolean]
