@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import * as server from '@minecraft/server'
+import { world, system } from '@minecraft/server'
 
 export namespace IPC {
   export type EventData = {
@@ -36,14 +36,14 @@ export namespace IPC {
       channel: channel,
       args: args
     }
-    server.world.getDimension('overworld').runCommand(`scriptevent ipc:invoke ${JSON.stringify(data)}`)
+    world.getDimension('overworld').runCommand(`scriptevent ipc:invoke ${JSON.stringify(data)}`)
     return new Promise(resolve => {
-      const event_listener = server.system.afterEvents.scriptEventReceive.subscribe(event => {
+      const event_listener = system.afterEvents.scriptEventReceive.subscribe(event => {
         if (event.id === 'ipc:handle') {
           const handle_data = JSON.parse(event.message) as EventData
           if (handle_data.channel === channel) {
             resolve(handle_data.args)
-            server.system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
+            system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
           }
         }
       })
@@ -52,58 +52,57 @@ export namespace IPC {
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
   export function handle(channel: string, listener: (...args: any[]) => any) {
-    server.system.afterEvents.scriptEventReceive.subscribe(event => {
-      if (event.id === 'ipc:invoke') {
-        const invoke_data = JSON.parse(event.message) as EventData
-        if (invoke_data.channel === channel) {
-          const args = listener(...invoke_data.args)
-          const data: EventData = {
-            channel: channel,
-            args: args
-          }
-          server.system.run(() => {
-            server.world.getDimension('overworld').runCommand(`scriptevent ipc:handle ${JSON.stringify(data)}`)
-          })
-        }
+    receive('ipc:invoke', channel, (...args) => {
+      const result = listener(...args)
+      const data: EventData = {
+        channel: channel,
+        args: result
       }
+      system.run(() => {
+        world.getDimension('overworld').runCommand(`scriptevent ipc:handle ${JSON.stringify(data)}`)
+      })
     })
   }
 
   /** Sends a message with `args` to `channel` */
   export function send(channel: string, ...args: any[]): void {
-    const data: EventData = {
-      channel: channel,
-      args: args
-    }
-    server.system.run(() => {
-      server.world.getDimension('overworld').runCommand(`scriptevent ipc:send ${JSON.stringify(data)}`)
-    })
+    emit('ipc:send', channel, args)
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on(channel: string, listener: (...args: any[]) => void) {
-    server.system.afterEvents.scriptEventReceive.subscribe(event => {
-      if (event.id === 'ipc:send') {
-        const send_data = JSON.parse(event.message) as EventData
-        if (send_data.channel === channel) {
-          listener(...send_data.args)
+    receive('ipc:send', channel, listener)
+  }
+
+  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
+  export function once(channel: string, listener: (...args: any[]) => void) {
+    const event = receive('ipc:send', channel, (...args) => {
+      listener(...args)
+      system.afterEvents.scriptEventReceive.unsubscribe(event)
+    })
+  }
+
+  function receive(id: string, channel: string, callback: (...args: any[]) => void) {
+    return system.afterEvents.scriptEventReceive.subscribe(event => {
+      if (event.id === id) {
+        const data = JSON.parse(event.message) as EventData
+        if (data.channel === channel) {
+          callback(...data.args)
         }
       }
     })
   }
 
-  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once(channel: string, listener: (...args: any[]) => void) {
-    const event_listener = server.system.afterEvents.scriptEventReceive.subscribe(event => {
-      if (event.id === 'ipc:send') {
-        const send_data = JSON.parse(event.message) as EventData
-        if (send_data.channel === channel) {
-          listener(...send_data.args)
-          server.system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
-        }
-      }
+  function emit(id: string, channel: string, ...args: any[]) {
+    const data: EventData = {
+      channel: channel,
+      args: args
+    }
+    system.run(() => {
+      world.getDimension('overworld').runCommand(`scriptevent ${id} ${JSON.stringify(data)}`)
     })
   }
+
 }
 
 export default IPC
