@@ -1,4 +1,5 @@
-const MAX_STR_SIZE = 1024
+const MAX_CMD_LENGTH = 2069
+const MAX_STR_LENGTH = 1024
 let ID = 0
 
 type ChunkData = [number, number, string] | [number, number, string, boolean]
@@ -26,8 +27,8 @@ export function deserialize(chunks: string[]) {
 
 export function chunk(data: string): ChunkData[] {
   const chunks =
-    data.length > MAX_STR_SIZE
-      ? (data.match(new RegExp(`.{1,${MAX_STR_SIZE}}`, 'g')) || []).map(match => {
+    data.length > MAX_STR_LENGTH
+      ? (data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || []).map(match => {
           return match
         })
       : [data]
