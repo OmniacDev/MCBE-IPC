@@ -25,7 +25,7 @@
 import { world, system } from '@minecraft/server'
 
 namespace Serializer {
-  const MAX_CMD_LENGTH = 2069
+  // const MAX_CMD_LENGTH = 2069
   const MAX_STR_LENGTH = 1024
   let ID = 0
 
