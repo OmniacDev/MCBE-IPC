@@ -77,17 +77,17 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
   // expect header, when received, create array and move temp chunks into it
   // when final fragment arrives, validate map
 
-  const buffer = new Map<number, { header: Header | undefined; contents: Contents[] }>()
+  const buffer = new Map<number, { header: Header | undefined; contents: (Contents | undefined)[] }>()
 
-  function tryResolve(fragment: { header: Header | undefined; contents: Contents[] }) {
+  function tryResolve(fragment: { header: Header | undefined; contents: (Contents | undefined)[] }) {
     if (
-      fragment.contents.filter(content => content !== null || typeof content !== 'undefined').length ===
-      fragment.contents.length
+      fragment.contents.length > 0 &&
+      fragment.contents.filter(content => content !== null && content !== undefined).length === fragment.header?.size
     ) {
       // no undefined, array is completed
       const full_str = fragment.contents
         .map(contents => {
-          return contents.data
+          return contents?.data
         })
         .join('')
 
@@ -96,10 +96,11 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
   }
 
   return system.afterEvents.scriptEventReceive.subscribe(event => {
-    if (event.id === `${id}:${channel}`) {
-      const obj = JSON.parse(event.message)
+    if (event.id === `${id}.${channel}`) {
+      const message_string = JSON.parse(event.message)
+      const obj = JSON.parse(message_string)
       if (Array.isArray(obj)) {
-        const contents: Contents = Contents.fromString(event.message)
+        const contents: Contents = Contents.fromString(message_string)
 
         if (!buffer.has(contents.id)) {
           buffer.set(contents.id, { header: undefined, contents: [] })
@@ -114,7 +115,7 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
           }
         }
       } else if (typeof obj === 'object') {
-        const header: Header = Header.fromString(event.message)
+        const header: Header = Header.fromString(message_string)
 
         if (!buffer.has(header.id)) {
           buffer.set(header.id, { header: undefined, contents: [] })
@@ -123,7 +124,6 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
         const fragment = buffer.get(header.id)
         if (fragment !== undefined) {
           fragment.header = header
-          fragment.contents.length = header.size
           tryResolve(fragment)
         }
       }
@@ -149,7 +149,7 @@ function emit(id: string, channel: string, ...args: any[]) {
   // send each fragment
   system.run(() => {
     strings.forEach(string => {
-      world.getDimension('overworld').runCommand(`scriptevent ${id}:${channel} ${string}`)
+      world.getDimension('overworld').runCommand(`scriptevent ${id}.${channel} ${JSON.stringify(string)}`)
     })
   })
 
