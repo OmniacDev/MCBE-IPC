@@ -66,10 +66,7 @@ const MAX_STR_LENGTH = 1024
 let ID = 0
 
 function fragment(data: string): Contents[] {
-  const fragments =
-    data.length > MAX_STR_LENGTH
-      ? (data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || [])
-      : [data]
+  const fragments = data.length > MAX_STR_LENGTH ? data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || [] : [data]
   return fragments.map((fragment, index) => {
     return { id: ID, index: index, data: fragment }
   })
@@ -83,11 +80,16 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
   const buffer = new Map<number, { header: Header | undefined; contents: Contents[] }>()
 
   function tryResolve(fragment: { header: Header | undefined; contents: Contents[] }) {
-    if (fragment.contents.filter(content => content !== null || typeof content !== 'undefined').length === fragment.contents.length) {
+    if (
+      fragment.contents.filter(content => content !== null || typeof content !== 'undefined').length ===
+      fragment.contents.length
+    ) {
       // no undefined, array is completed
-      const full_str = fragment.contents.map(contents => {
-        return contents.data
-      }).join('')
+      const full_str = fragment.contents
+        .map(contents => {
+          return contents.data
+        })
+        .join('')
 
       callback(...JSON.parse(full_str))
     }
@@ -111,8 +113,7 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
             tryResolve(fragment)
           }
         }
-      }
-      else if (typeof obj === 'object') {
+      } else if (typeof obj === 'object') {
         const header: Header = Header.fromString(event.message)
 
         if (!buffer.has(header.id)) {
