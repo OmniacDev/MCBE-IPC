@@ -25,9 +25,48 @@
 import { world, system } from '@minecraft/server'
 
 type ChunkData = [number, number, string] | [number, number, string, boolean]
-type EventData = {
+
+interface EventData {
   channel: string
   args: any[]
+}
+
+interface Header {
+  id: number
+  size: number
+}
+
+namespace Header {
+  export function toString(header: Header): string {
+    return JSON.stringify(header)
+  }
+  export function fromString(string: string): Header {
+    return JSON.parse(string) as Header
+  }
+}
+
+interface Contents {
+  id: number
+  index: number
+  data: string
+}
+
+namespace Contents {
+  export type Packed = [number, number, string]
+  export function toString(contents: Contents): string {
+    return JSON.stringify(toPacked(contents))
+  }
+  export function fromString(string: string): Contents {
+    return fromPacked(JSON.parse(string) as Packed)
+  }
+
+  function toPacked(contents: Contents): Packed {
+    return [contents.id, contents.index, contents.data]
+  }
+
+  function fromPacked(packed: Packed): Contents {
+    return { id: packed[0], index: packed[1], data: packed[2] }
+  }
 }
 
 // const MAX_CMD_LENGTH = 2069
@@ -35,7 +74,7 @@ const MAX_STR_LENGTH = 1024
 let ID = 0
 
 function serialize(data: any): string[] {
-  return chunk(JSON.stringify(data)).map(data_chunk => {
+  return fragment(JSON.stringify(data)).map(data_chunk => {
     return JSON.stringify(data_chunk)
   })
 }
@@ -55,41 +94,87 @@ function deserialize(chunks: string[]) {
   })
 }
 
-function chunk(data: string): ChunkData[] {
-  const chunks =
+function fragment(data: string): Contents[] {
+  const fragments =
     data.length > MAX_STR_LENGTH
       ? (data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || []).map(match => {
           return match
         })
       : [data]
-  ID++
-  return chunks.map((chunk, index) => {
-    if (index === chunks.length - 1) {
-      return [ID, index, chunk, true]
-    }
-    return [ID, index, chunk]
+  return fragments.map((fragment, index) => {
+    return { id: ID, index: index, data: fragment }
   })
 }
 
 function receive(id: string, channel: string, callback: (...args: any[]) => void) {
+  // create temp buffer for received chunks
+  // expect header, when received, create array and move temp chunks into it
+  // when final fragment arrives, validate map
   return system.afterEvents.scriptEventReceive.subscribe(event => {
-    if (event.id === id) {
-      const data = JSON.parse(event.message) as EventData
-      if (data.channel === channel) {
-        callback(...data.args)
+    if (event.id === `${id}:${channel}`) {
+      const obj = JSON.parse(event.message)
+      const buffer = new Map<number, { header: Header | undefined; contents: Contents[] }>()
+      if (Array.isArray(obj)) {
+        const contents: Contents = Contents.fromString(event.message)
+
+        if (!buffer.has(contents.id)) {
+          buffer.set(contents.id, { header: undefined, contents: [] })
+        }
+
+        const fragment = buffer.get(contents.id)
+        if (fragment !== undefined) {
+          fragment.contents[contents.index] = contents
+        }
+      } else if (typeof obj === 'object') {
+        const header: Header = Header.fromString(event.message)
+
+        if (!buffer.has(header.id)) {
+          buffer.set(header.id, { header: undefined, contents: [] })
+        }
+
+        const fragment = buffer.get(header.id)
+        if (fragment !== undefined) {
+          fragment.header = header
+          fragment.contents.length = header.size
+          if (fragment.contents.filter(contents => contents === undefined).length === 0) {
+            // no undefined, array is completed
+            const full_str = fragment.contents.map(contents => {
+              return contents.data
+            }).join('')
+
+            const return_data = JSON.parse(full_str)
+          }
+        }
       }
+
+      // callback(...args)
     }
   })
 }
 
 function emit(id: string, channel: string, ...args: any[]) {
-  const data: EventData = {
-    channel: channel,
-    args: args
+  const strings: string[] = []
+  // fragment args
+  const contents: Contents[] = fragment(JSON.stringify(args))
+  // create header
+  const header: Header = {
+    id: ID,
+    size: contents.length
   }
-  system.run(() => {
-    world.getDimension('overworld').runCommand(`scriptevent ${id} ${JSON.stringify(data)}`)
+  // stringify header & fragments
+  strings.push(Header.toString(header))
+  contents.map(content => {
+    strings.push(Contents.toString(content))
   })
+  // send each fragment
+  system.run(() => {
+    strings.forEach(string => {
+      world.getDimension('overworld').runCommand(`scriptevent ${id}:${channel} ${string}`)
+    })
+  })
+
+  // increment ID
+  ID++
 }
 
 export namespace IPC {
