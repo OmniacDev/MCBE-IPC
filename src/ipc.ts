@@ -24,57 +24,75 @@
 
 import { world, system } from '@minecraft/server'
 
-namespace Serializer {
-  // const MAX_CMD_LENGTH = 2069
-  const MAX_STR_LENGTH = 1024
-  let ID = 0
+type ChunkData = [number, number, string] | [number, number, string, boolean]
+type EventData = {
+  channel: string
+  args: any[]
+}
 
-  type ChunkData = [number, number, string] | [number, number, string, boolean]
+// const MAX_CMD_LENGTH = 2069
+const MAX_STR_LENGTH = 1024
+let ID = 0
 
-  export function serialize(data: any): string[] {
-    return chunk(JSON.stringify(data)).map(data_chunk => {
-      return JSON.stringify(data_chunk)
-    })
-  }
+function serialize(data: any): string[] {
+  return chunk(JSON.stringify(data)).map(data_chunk => {
+    return JSON.stringify(data_chunk)
+  })
+}
 
-  export function deserialize(chunks: string[]) {
-    const data = new Map<number, string[]>()
-    chunks.map(str_chunk => {
-      const chunk_data = JSON.parse(str_chunk) as ChunkData
-      const map_data = data.get(chunk_data[0])
-      if (map_data !== undefined) {
-        map_data[chunk_data[1]] = chunk_data[2]
+function deserialize(chunks: string[]) {
+  const data = new Map<number, string[]>()
+  chunks.map(str_chunk => {
+    const chunk_data = JSON.parse(str_chunk) as ChunkData
+    const map_data = data.get(chunk_data[0])
+    if (map_data !== undefined) {
+      map_data[chunk_data[1]] = chunk_data[2]
+    }
+  })
+
+  return Array.from(data.values()).map(data_arr => {
+    data_arr.join('')
+  })
+}
+
+function chunk(data: string): ChunkData[] {
+  const chunks =
+    data.length > MAX_STR_LENGTH
+      ? (data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || []).map(match => {
+        return match
+      })
+      : [data]
+  ID++
+  return chunks.map((chunk, index) => {
+    if (index === chunks.length - 1) {
+      return [ID, index, chunk, true]
+    }
+    return [ID, index, chunk]
+  })
+}
+
+function receive(id: string, channel: string, callback: (...args: any[]) => void) {
+  return system.afterEvents.scriptEventReceive.subscribe(event => {
+    if (event.id === id) {
+      const data = JSON.parse(event.message) as EventData
+      if (data.channel === channel) {
+        callback(...data.args)
       }
-    })
+    }
+  })
+}
 
-    return Array.from(data.values()).map(data_arr => {
-      data_arr.join('')
-    })
+function emit(id: string, channel: string, ...args: any[]) {
+  const data: EventData = {
+    channel: channel,
+    args: args
   }
-
-  export function chunk(data: string): ChunkData[] {
-    const chunks =
-      data.length > MAX_STR_LENGTH
-        ? (data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || []).map(match => {
-          return match
-        })
-        : [data]
-    ID++
-    return chunks.map((chunk, index) => {
-      if (index === chunks.length - 1) {
-        return [ID, index, chunk, true]
-      }
-      return [ID, index, chunk]
-    })
-  }
+  system.run(() => {
+    world.getDimension('overworld').runCommand(`scriptevent ${id} ${JSON.stringify(data)}`)
+  })
 }
 
 export namespace IPC {
-  export type EventData = {
-    channel: string
-    args: any[]
-  }
-
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke(channel: string, ...args: any[]): Promise<any> {
     emit('ipc:invoke', channel, args)
@@ -111,28 +129,6 @@ export namespace IPC {
       system.afterEvents.scriptEventReceive.unsubscribe(event)
     })
   }
-
-  function receive(id: string, channel: string, callback: (...args: any[]) => void) {
-    return system.afterEvents.scriptEventReceive.subscribe(event => {
-      if (event.id === id) {
-        const data = JSON.parse(event.message) as EventData
-        if (data.channel === channel) {
-          callback(...data.args)
-        }
-      }
-    })
-  }
-
-  function emit(id: string, channel: string, ...args: any[]) {
-    const data: EventData = {
-      channel: channel,
-      args: args
-    }
-    system.run(() => {
-      world.getDimension('overworld').runCommand(`scriptevent ${id} ${JSON.stringify(data)}`)
-    })
-  }
-
 }
 
 export default IPC
