@@ -97,9 +97,7 @@ function deserialize(chunks: string[]) {
 function fragment(data: string): Contents[] {
   const fragments =
     data.length > MAX_STR_LENGTH
-      ? (data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || []).map(match => {
-          return match
-        })
+      ? (data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || [])
       : [data]
   return fragments.map((fragment, index) => {
     return { id: ID, index: index, data: fragment }
