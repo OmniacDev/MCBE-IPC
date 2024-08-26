@@ -24,13 +24,6 @@
 
 import { world, system } from '@minecraft/server'
 
-type ChunkData = [number, number, string] | [number, number, string, boolean]
-
-interface EventData {
-  channel: string
-  args: any[]
-}
-
 interface Header {
   id: number
   size: number
@@ -69,30 +62,8 @@ namespace Contents {
   }
 }
 
-// const MAX_CMD_LENGTH = 2069
 const MAX_STR_LENGTH = 1024
 let ID = 0
-
-function serialize(data: any): string[] {
-  return fragment(JSON.stringify(data)).map(data_chunk => {
-    return JSON.stringify(data_chunk)
-  })
-}
-
-function deserialize(chunks: string[]) {
-  const data = new Map<number, string[]>()
-  chunks.map(str_chunk => {
-    const chunk_data = JSON.parse(str_chunk) as ChunkData
-    const map_data = data.get(chunk_data[0])
-    if (map_data !== undefined) {
-      map_data[chunk_data[1]] = chunk_data[2]
-    }
-  })
-
-  return Array.from(data.values()).map(data_arr => {
-    data_arr.join('')
-  })
-}
 
 function fragment(data: string): Contents[] {
   const fragments =
@@ -108,10 +79,23 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
   // create temp buffer for received chunks
   // expect header, when received, create array and move temp chunks into it
   // when final fragment arrives, validate map
+
+  const buffer = new Map<number, { header: Header | undefined; contents: Contents[] }>()
+
+  function tryResolve(fragment: { header: Header | undefined; contents: Contents[] }) {
+    if (fragment.contents.filter(content => content !== null || typeof content !== 'undefined').length === fragment.contents.length) {
+      // no undefined, array is completed
+      const full_str = fragment.contents.map(contents => {
+        return contents.data
+      }).join('')
+
+      callback(...JSON.parse(full_str))
+    }
+  }
+
   return system.afterEvents.scriptEventReceive.subscribe(event => {
     if (event.id === `${id}:${channel}`) {
       const obj = JSON.parse(event.message)
-      const buffer = new Map<number, { header: Header | undefined; contents: Contents[] }>()
       if (Array.isArray(obj)) {
         const contents: Contents = Contents.fromString(event.message)
 
@@ -122,8 +106,13 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
         const fragment = buffer.get(contents.id)
         if (fragment !== undefined) {
           fragment.contents[contents.index] = contents
+
+          if (fragment.header !== undefined) {
+            tryResolve(fragment)
+          }
         }
-      } else if (typeof obj === 'object') {
+      }
+      else if (typeof obj === 'object') {
         const header: Header = Header.fromString(event.message)
 
         if (!buffer.has(header.id)) {
@@ -134,18 +123,9 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
         if (fragment !== undefined) {
           fragment.header = header
           fragment.contents.length = header.size
-          if (fragment.contents.filter(contents => contents === undefined).length === 0) {
-            // no undefined, array is completed
-            const full_str = fragment.contents.map(contents => {
-              return contents.data
-            }).join('')
-
-            const return_data = JSON.parse(full_str)
-          }
+          tryResolve(fragment)
         }
       }
-
-      // callback(...args)
     }
   })
 }
@@ -164,6 +144,7 @@ function emit(id: string, channel: string, ...args: any[]) {
   contents.map(content => {
     strings.push(Contents.toString(content))
   })
+
   // send each fragment
   system.run(() => {
     strings.forEach(string => {
