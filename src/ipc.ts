@@ -32,20 +32,11 @@ export namespace IPC {
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke(channel: string, ...args: any[]): Promise<any> {
-    const data: EventData = {
-      channel: channel,
-      args: args
-    }
-    world.getDimension('overworld').runCommand(`scriptevent ipc:invoke ${JSON.stringify(data)}`)
+    emit('ipc:invoke', channel, args)
     return new Promise(resolve => {
-      const event_listener = system.afterEvents.scriptEventReceive.subscribe(event => {
-        if (event.id === 'ipc:handle') {
-          const handle_data = JSON.parse(event.message) as EventData
-          if (handle_data.channel === channel) {
-            resolve(handle_data.args)
-            system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
-          }
-        }
+      const listener = receive('ipc:handle', channel, (args) => {
+        resolve(args)
+        system.afterEvents.scriptEventReceive.unsubscribe(listener)
       })
     })
   }
@@ -54,13 +45,7 @@ export namespace IPC {
   export function handle(channel: string, listener: (...args: any[]) => any) {
     receive('ipc:invoke', channel, (...args) => {
       const result = listener(...args)
-      const data: EventData = {
-        channel: channel,
-        args: result
-      }
-      system.run(() => {
-        world.getDimension('overworld').runCommand(`scriptevent ipc:handle ${JSON.stringify(data)}`)
-      })
+      emit('ipc:handle', channel, result)
     })
   }
 
