@@ -34,7 +34,7 @@ export namespace IPC {
   export function invoke(channel: string, ...args: any[]): Promise<any> {
     emit('ipc:invoke', channel, args)
     return new Promise(resolve => {
-      const listener = receive('ipc:handle', channel, (args) => {
+      const listener = receive('ipc:handle', channel, (...args) => {
         resolve(args)
         system.afterEvents.scriptEventReceive.unsubscribe(listener)
       })
