@@ -59,8 +59,8 @@ function chunk(data: string): ChunkData[] {
   const chunks =
     data.length > MAX_STR_LENGTH
       ? (data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || []).map(match => {
-        return match
-      })
+          return match
+        })
       : [data]
   ID++
   return chunks.map((chunk, index) => {
