@@ -73,9 +73,6 @@ function fragment(data: string): Contents[] {
 }
 
 function receive(id: string, channel: string, callback: (...args: any[]) => void) {
-  // create temp buffer for received chunks
-  // expect header, when received, create array and move temp chunks into it
-  // when final fragment arrives, validate map
   const buffer = new Map<number, { header: Header | undefined; contents: (Contents | undefined)[] }>()
 
   function tryResolve(fragment: { header: Header | undefined; contents: (Contents | undefined)[] }) {
@@ -83,7 +80,6 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
       fragment.contents.length > 0 &&
       fragment.contents.filter(content => content !== null && content !== undefined).length === fragment.header?.size
     ) {
-      // no undefined, array is completed
       const full_str = fragment.contents
         .map(contents => {
           return contents?.data
@@ -100,11 +96,9 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
       const obj = JSON.parse(message_string)
       if (Array.isArray(obj)) {
         const contents: Contents = Contents.fromString(message_string)
-
         if (!buffer.has(contents.id)) {
           buffer.set(contents.id, { header: undefined, contents: [] })
         }
-
         const fragment = buffer.get(contents.id)
         if (fragment !== undefined) {
           fragment.contents[contents.index] = contents
@@ -119,7 +113,6 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
         if (!buffer.has(header.id)) {
           buffer.set(header.id, { header: undefined, contents: [] })
         }
-
         const fragment = buffer.get(header.id)
         if (fragment !== undefined) {
           fragment.header = header
@@ -132,27 +125,20 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
 
 function emit(id: string, channel: string, ...args: any[]) {
   const strings: string[] = []
-  // fragment args
   const contents: Contents[] = fragment(JSON.stringify(args))
-  // create header
   const header: Header = {
     id: ID,
     size: contents.length
   }
-  // stringify header & fragments
   strings.push(Header.toString(header))
   contents.map(content => {
     strings.push(Contents.toString(content))
   })
-
-  // send each fragment
   system.run(() => {
     strings.forEach(string => {
       world.getDimension('overworld').runCommand(`scriptevent ${id}.${channel} ${JSON.stringify(string)}`)
     })
   })
-
-  // increment ID
   ID++
 }
 
