@@ -76,7 +76,6 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
   // create temp buffer for received chunks
   // expect header, when received, create array and move temp chunks into it
   // when final fragment arrives, validate map
-
   const buffer = new Map<number, { header: Header | undefined; contents: (Contents | undefined)[] }>()
 
   function tryResolve(fragment: { header: Header | undefined; contents: (Contents | undefined)[] }) {
