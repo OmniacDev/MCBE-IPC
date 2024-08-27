@@ -134,11 +134,13 @@ function emit(id: string, channel: string, ...args: any[]) {
   contents.map(content => {
     strings.push(Contents.toString(content))
   })
-  system.run(() => {
-    strings.forEach(string => {
+  function* send(strings: string[]) {
+    for (const string of strings) {
       world.getDimension('overworld').runCommand(`scriptevent ${id}.${channel} ${JSON.stringify(string)}`)
-    })
-  })
+      yield
+    }
+  }
+  system.runJob(send(strings))
   ID++
 }
 
