@@ -72,7 +72,7 @@ function fragment(data: string): Contents[] {
   })
 }
 
-function receive(id: string, channel: string, callback: (...args: any[]) => void) {
+function receive(id: string, channel: string, callback: (args: any[]) => void) {
   const buffer = new Map<number, { header: Header | undefined; contents: (Contents | undefined)[] }>()
 
   function tryResolve(fragment: { header: Header | undefined; contents: (Contents | undefined)[] }) {
@@ -86,7 +86,7 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
         })
         .join('')
 
-      callback(...JSON.parse(full_str))
+      callback(JSON.parse(full_str))
     }
   }
 
@@ -123,7 +123,7 @@ function receive(id: string, channel: string, callback: (...args: any[]) => void
   })
 }
 
-function emit(id: string, channel: string, ...args: any[]) {
+function emit(id: string, channel: string, args: any[]) {
   const strings: string[] = []
   const contents: Contents[] = fragment(JSON.stringify(args))
   const header: Header = {
@@ -147,10 +147,10 @@ function emit(id: string, channel: string, ...args: any[]) {
 export namespace IPC {
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke(channel: string, ...args: any[]): Promise<any> {
-    emit('ipc:invoke', channel, ...args)
+    emit('ipc:invoke', channel, args)
     return new Promise(resolve => {
-      const listener = receive('ipc:handle', channel, (args) => {
-        resolve(args)
+      const listener = receive('ipc:handle', channel, args => {
+        resolve(args[0])
         system.afterEvents.scriptEventReceive.unsubscribe(listener)
       })
     })
@@ -158,25 +158,27 @@ export namespace IPC {
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
   export function handle(channel: string, listener: (...args: any[]) => any) {
-    receive('ipc:invoke', channel, (...args) => {
+    receive('ipc:invoke', channel, args => {
       const result = listener(...args)
-      emit('ipc:handle', channel, result)
+      emit('ipc:handle', channel, [result])
     })
   }
 
   /** Sends a message with `args` to `channel` */
   export function send(channel: string, ...args: any[]): void {
-    emit('ipc:send', channel, ...args)
+    emit('ipc:send', channel, args)
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on(channel: string, listener: (...args: any[]) => void) {
-    receive('ipc:send', channel, listener)
+    receive('ipc:send', channel, args => {
+      listener(...args)
+    })
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
   export function once(channel: string, listener: (...args: any[]) => void) {
-    const event = receive('ipc:send', channel, (...args) => {
+    const event = receive('ipc:send', channel, args => {
       listener(...args)
       system.afterEvents.scriptEventReceive.unsubscribe(event)
     })
