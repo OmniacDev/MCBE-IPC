@@ -91,36 +91,38 @@ function receive(id: string, channel: string, callback: (args: any[]) => void) {
   }
 
   return system.afterEvents.scriptEventReceive.subscribe(event => {
-    if (event.id === `${id}.${channel}`) {
-      const message_string = JSON.parse(event.message)
-      const obj = JSON.parse(message_string)
-      if (Array.isArray(obj)) {
-        const contents: Contents = Contents.fromString(message_string)
-        if (!buffer.has(contents.id)) {
-          buffer.set(contents.id, { header: undefined, contents: [] })
-        }
-        const fragment = buffer.get(contents.id)
-        if (fragment !== undefined) {
-          fragment.contents[contents.index] = contents
+    if (event.id === `ipc:${id}`) {
+      const payload = JSON.parse(decodeURIComponent(event.message)) as [string, string]
+      if (payload[0] === channel) {
+        const obj = JSON.parse(payload[1])
+        if (Array.isArray(obj)) {
+          const contents: Contents = Contents.fromString(payload[1])
+          if (!buffer.has(contents.id)) {
+            buffer.set(contents.id, { header: undefined, contents: [] })
+          }
+          const fragment = buffer.get(contents.id)
+          if (fragment !== undefined) {
+            fragment.contents[contents.index] = contents
 
-          if (fragment.header !== undefined) {
+            if (fragment.header !== undefined) {
+              tryResolve(fragment)
+            }
+          }
+        } else if (typeof obj === 'object') {
+          const header: Header = Header.fromString(payload[1])
+
+          if (!buffer.has(header.id)) {
+            buffer.set(header.id, { header: undefined, contents: [] })
+          }
+          const fragment = buffer.get(header.id)
+          if (fragment !== undefined) {
+            fragment.header = header
             tryResolve(fragment)
           }
         }
-      } else if (typeof obj === 'object') {
-        const header: Header = Header.fromString(message_string)
-
-        if (!buffer.has(header.id)) {
-          buffer.set(header.id, { header: undefined, contents: [] })
-        }
-        const fragment = buffer.get(header.id)
-        if (fragment !== undefined) {
-          fragment.header = header
-          tryResolve(fragment)
-        }
       }
     }
-  })
+  }, { namespaces: ['ipc'] })
 }
 
 function emit(id: string, channel: string, args: any[]) {
@@ -136,7 +138,7 @@ function emit(id: string, channel: string, args: any[]) {
   })
   function* send(strings: string[]) {
     for (const string of strings) {
-      world.getDimension('overworld').runCommand(`scriptevent ${id}.${channel} ${JSON.stringify(string)}`)
+      world.getDimension('overworld').runCommand(`scriptevent ipc:${id} ${encodeURIComponent(JSON.stringify([channel, string]))}`)
       yield
     }
   }
@@ -147,9 +149,9 @@ function emit(id: string, channel: string, args: any[]) {
 export namespace IPC {
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke(channel: string, ...args: any[]): Promise<any> {
-    emit('ipc:invoke', channel, args)
+    emit('invoke', channel, args)
     return new Promise(resolve => {
-      const listener = receive('ipc:handle', channel, args => {
+      const listener = receive('handle', channel, args => {
         resolve(args[0])
         system.afterEvents.scriptEventReceive.unsubscribe(listener)
       })
@@ -158,27 +160,27 @@ export namespace IPC {
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
   export function handle(channel: string, listener: (...args: any[]) => any) {
-    receive('ipc:invoke', channel, args => {
+    receive('invoke', channel, args => {
       const result = listener(...args)
-      emit('ipc:handle', channel, [result])
+      emit('handle', channel, [result])
     })
   }
 
   /** Sends a message with `args` to `channel` */
   export function send(channel: string, ...args: any[]): void {
-    emit('ipc:send', channel, args)
+    emit('send', channel, args)
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on(channel: string, listener: (...args: any[]) => void) {
-    receive('ipc:send', channel, args => {
+    receive('send', channel, args => {
       listener(...args)
     })
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
   export function once(channel: string, listener: (...args: any[]) => void) {
-    const event = receive('ipc:send', channel, args => {
+    const event = receive('send', channel, args => {
       listener(...args)
       system.afterEvents.scriptEventReceive.unsubscribe(event)
     })
