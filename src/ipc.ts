@@ -147,9 +147,9 @@ function emit(id: string, channel: string, ...args: any[]) {
 export namespace IPC {
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke(channel: string, ...args: any[]): Promise<any> {
-    emit('ipc:invoke', channel, args)
+    emit('ipc:invoke', channel, ...args)
     return new Promise(resolve => {
-      const listener = receive('ipc:handle', channel, (...args) => {
+      const listener = receive('ipc:handle', channel, (args) => {
         resolve(args)
         system.afterEvents.scriptEventReceive.unsubscribe(listener)
       })
@@ -166,7 +166,7 @@ export namespace IPC {
 
   /** Sends a message with `args` to `channel` */
   export function send(channel: string, ...args: any[]): void {
-    emit('ipc:send', channel, args)
+    emit('ipc:send', channel, ...args)
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
