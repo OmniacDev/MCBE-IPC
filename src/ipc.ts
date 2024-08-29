@@ -90,39 +90,42 @@ function receive(id: string, channel: string, callback: (args: any[]) => void) {
     }
   }
 
-  return system.afterEvents.scriptEventReceive.subscribe(event => {
-    if (event.id === `ipc:${id}`) {
-      const payload = JSON.parse(decodeURIComponent(event.message)) as [string, string]
-      if (payload[0] === channel) {
-        const obj = JSON.parse(payload[1])
-        if (Array.isArray(obj)) {
-          const contents: Contents = Contents.fromString(payload[1])
-          if (!buffer.has(contents.id)) {
-            buffer.set(contents.id, { header: undefined, contents: [] })
-          }
-          const fragment = buffer.get(contents.id)
-          if (fragment !== undefined) {
-            fragment.contents[contents.index] = contents
+  return system.afterEvents.scriptEventReceive.subscribe(
+    event => {
+      if (event.id === `ipc:${id}`) {
+        const payload = JSON.parse(decodeURIComponent(event.message)) as [string, string]
+        if (payload[0] === channel) {
+          const obj = JSON.parse(payload[1])
+          if (Array.isArray(obj)) {
+            const contents: Contents = Contents.fromString(payload[1])
+            if (!buffer.has(contents.id)) {
+              buffer.set(contents.id, { header: undefined, contents: [] })
+            }
+            const fragment = buffer.get(contents.id)
+            if (fragment !== undefined) {
+              fragment.contents[contents.index] = contents
 
-            if (fragment.header !== undefined) {
+              if (fragment.header !== undefined) {
+                tryResolve(fragment)
+              }
+            }
+          } else if (typeof obj === 'object') {
+            const header: Header = Header.fromString(payload[1])
+
+            if (!buffer.has(header.id)) {
+              buffer.set(header.id, { header: undefined, contents: [] })
+            }
+            const fragment = buffer.get(header.id)
+            if (fragment !== undefined) {
+              fragment.header = header
               tryResolve(fragment)
             }
           }
-        } else if (typeof obj === 'object') {
-          const header: Header = Header.fromString(payload[1])
-
-          if (!buffer.has(header.id)) {
-            buffer.set(header.id, { header: undefined, contents: [] })
-          }
-          const fragment = buffer.get(header.id)
-          if (fragment !== undefined) {
-            fragment.header = header
-            tryResolve(fragment)
-          }
         }
       }
-    }
-  }, { namespaces: ['ipc'] })
+    },
+    { namespaces: ['ipc'] }
+  )
 }
 
 function emit(id: string, channel: string, args: any[]) {
@@ -138,7 +141,9 @@ function emit(id: string, channel: string, args: any[]) {
   })
   function* send(strings: string[]) {
     for (const string of strings) {
-      world.getDimension('overworld').runCommand(`scriptevent ipc:${id} ${encodeURIComponent(JSON.stringify([channel, string]))}`)
+      world
+        .getDimension('overworld')
+        .runCommand(`scriptevent ipc:${id} ${encodeURIComponent(JSON.stringify([channel, string]))}`)
       yield
     }
   }
