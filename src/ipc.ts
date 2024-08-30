@@ -72,60 +72,6 @@ function fragment(data: string): Contents[] {
   })
 }
 
-function compress(input: string): string {
-  const dictionary: { [key: string]: number } = {}
-  const data: string[] = input.split('')
-  const output: number[] = []
-
-  let phrase: string = data[0]
-  let code: number = 256
-  for (let i = 1, l = data.length; i < l; i++) {
-    const char = data[i]
-    if (dictionary[phrase + char] != null) {
-      phrase += char
-    } else {
-      output.push(phrase.length > 1 ? dictionary[phrase] : phrase.charCodeAt(0))
-      dictionary[phrase + char] = code
-      code++
-      phrase = char
-    }
-  }
-  output.push(phrase.length > 1 ? dictionary[phrase] : phrase.charCodeAt(0))
-
-  return output
-    .map(n => {
-      return String.fromCharCode(n)
-    })
-    .join('')
-}
-
-function decompress(input: string): string {
-  const dictionary: { [key: number]: string } = {}
-  const data = input.split('')
-
-  let char = data[0]
-  let prev_phrase = char
-  let code = 256
-
-  const output = [char]
-  for (let i = 1, l = data.length; i < l; i++) {
-    let phrase: string
-    const currentCode = data[i].charCodeAt(0)
-    if (currentCode < 256) {
-      phrase = data[i]
-    } else {
-      phrase = dictionary[currentCode] ? dictionary[currentCode] : prev_phrase + char
-    }
-    output.push(phrase)
-    char = phrase.charAt(0)
-    dictionary[code] = prev_phrase + char
-    code++
-    prev_phrase = phrase
-  }
-
-  return output.join('')
-}
-
 function receive(id: string, channel: string, callback: (args: any[]) => void) {
   const buffer = new Map<number, { header: Header | undefined; contents: (Contents | undefined)[] }>()
 
