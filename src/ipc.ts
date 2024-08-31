@@ -80,11 +80,7 @@ function receive(id: string, channel: string, callback: (args: any[]) => void) {
       fragment.contents.length > 0 &&
       fragment.contents.filter(content => content !== null && content !== undefined).length === fragment.header?.size
     ) {
-      const full_str = fragment.contents
-        .map(contents => {
-          return contents?.data
-        })
-        .join('')
+      const full_str = fragment.contents.map(contents => contents?.data).join('')
 
       callback(JSON.parse(full_str))
     }
@@ -136,9 +132,7 @@ function emit(id: string, channel: string, args: any[]) {
     size: contents.length
   }
   strings.push(Header.toString(header))
-  contents.map(content => {
-    strings.push(Contents.toString(content))
-  })
+  contents.forEach(content => strings.push(Contents.toString(content)))
   function* send(strings: string[]) {
     for (const string of strings) {
       world
