@@ -24,96 +24,77 @@
 
 import { world, system } from '@minecraft/server'
 
-interface Header {
-  id: number
-  size: number
-}
-
-namespace Header {
-  export function toString(header: Header): string {
-    return JSON.stringify(header)
-  }
-  export function fromString(string: string): Header {
-    return JSON.parse(string) as Header
-  }
-}
-
-interface Contents {
+interface Payload {
+  channel: string
   id: number
   index: number
   data: string
+  final?: boolean
 }
 
-namespace Contents {
-  export type Packed = [number, number, string]
-  export function toString(contents: Contents): string {
+namespace Payload {
+  export type Packed = [string, number, number, string] | [string, number, number, string, number]
+  export function toString(contents: Payload): string {
     return JSON.stringify(toPacked(contents))
   }
-  export function fromString(string: string): Contents {
+  export function fromString(string: string): Payload {
     return fromPacked(JSON.parse(string) as Packed)
   }
 
-  function toPacked(contents: Contents): Packed {
-    return [contents.id, contents.index, contents.data]
+  export function toPacked(contents: Payload): Packed {
+    return contents.final !== undefined
+      ? [contents.channel, contents.id, contents.index, contents.data, contents.final ? 1 : 0]
+      : [contents.channel, contents.id, contents.index, contents.data]
   }
 
-  function fromPacked(packed: Packed): Contents {
-    return { id: packed[0], index: packed[1], data: packed[2] }
+  export function fromPacked(packed: Packed): Payload {
+    return packed[3] !== undefined
+      ? { channel: packed[0], id: packed[1], index: packed[2], data: packed[3], final: packed[4] === 1 }
+      : { channel: packed[0], id: packed[1], index: packed[2], data: packed[3] }
   }
 }
 
 const MAX_STR_LENGTH = 1024
 let ID = 0
 
-function fragment(data: string): Contents[] {
+function fragment(channel: string, data: string): Payload[] {
   const fragments = data.length > MAX_STR_LENGTH ? data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || [] : [data]
   return fragments.map((fragment, index) => {
-    return { id: ID, index: index, data: fragment }
+    return index === fragments.length - 1
+      ? { channel: channel, id: ID, index: index, data: fragment, final: true }
+      : { channel: channel, id: ID, index: index, data: fragment }
   })
 }
 
 function receive(id: string, channel: string, callback: (args: any[]) => void) {
-  const buffer = new Map<number, { header: Header | undefined; contents: (Contents | undefined)[] }>()
-
-  function tryResolve(fragment: { header: Header | undefined; contents: (Contents | undefined)[] }) {
+  const buffer = new Map<number, { size: number | undefined; payloads: (Payload | undefined)[] }>()
+  function tryResolve(fragment: { size: number | undefined; payloads: (Payload | undefined)[] }) {
     if (
-      fragment.contents.length > 0 &&
-      fragment.contents.filter(content => content !== null && content !== undefined).length === fragment.header?.size
+      fragment.payloads.length > 0 &&
+      fragment.payloads.filter(content => content !== null && content !== undefined).length === fragment.size
     ) {
-      const full_str = fragment.contents.map(contents => contents?.data).join('')
+      const full_str = fragment.payloads.map(contents => contents?.data).join('')
 
       callback(JSON.parse(full_str))
     }
   }
-
   return system.afterEvents.scriptEventReceive.subscribe(
     event => {
       if (event.id === `ipc:${id}`) {
-        const payload = JSON.parse(decodeURIComponent(event.message)) as [string, string]
+        const payload = JSON.parse(decodeURIComponent(event.message)) as Payload.Packed
         if (payload[0] === channel) {
-          const obj = JSON.parse(payload[1])
-          if (Array.isArray(obj)) {
-            const contents: Contents = Contents.fromString(payload[1])
-            if (!buffer.has(contents.id)) {
-              buffer.set(contents.id, { header: undefined, contents: [] })
+          const contents: Payload = Payload.fromPacked(payload)
+          if (!buffer.has(contents.id)) {
+            buffer.set(contents.id, { size: undefined, payloads: [] })
+          }
+          const fragment = buffer.get(contents.id)
+          if (fragment !== undefined) {
+            if (contents.final) {
+              fragment.size = contents.index + 1
             }
-            const fragment = buffer.get(contents.id)
-            if (fragment !== undefined) {
-              fragment.contents[contents.index] = contents
+            fragment.payloads[contents.index] = contents
 
-              if (fragment.header !== undefined) {
-                tryResolve(fragment)
-              }
-            }
-          } else if (typeof obj === 'object') {
-            const header: Header = Header.fromString(payload[1])
-
-            if (!buffer.has(header.id)) {
-              buffer.set(header.id, { header: undefined, contents: [] })
-            }
-            const fragment = buffer.get(header.id)
-            if (fragment !== undefined) {
-              fragment.header = header
+            if (fragment.size !== undefined) {
               tryResolve(fragment)
             }
           }
@@ -126,18 +107,11 @@ function receive(id: string, channel: string, callback: (args: any[]) => void) {
 
 function emit(id: string, channel: string, args: any[]) {
   const strings: string[] = []
-  const contents: Contents[] = fragment(JSON.stringify(args))
-  const header: Header = {
-    id: ID,
-    size: contents.length
-  }
-  strings.push(Header.toString(header))
-  contents.forEach(content => strings.push(Contents.toString(content)))
+  const payloads: Payload[] = fragment(channel, JSON.stringify(args))
+  payloads.forEach(payload => strings.push(Payload.toString(payload)))
   function* send(strings: string[]) {
     for (const string of strings) {
-      world
-        .getDimension('overworld')
-        .runCommand(`scriptevent ipc:${id} ${encodeURIComponent(JSON.stringify([channel, string]))}`)
+      world.getDimension('overworld').runCommand(`scriptevent ipc:${id} ${encodeURIComponent(string)}`)
       yield
     }
   }
