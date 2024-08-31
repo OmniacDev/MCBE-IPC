@@ -151,7 +151,7 @@ function emit(id: string, channel: string, args: any[]) {
   ID++
 }
 
-export namespace IPC {
+namespace IPC {
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke(channel: string, ...args: any[]): Promise<any> {
     emit('invoke', channel, args)
