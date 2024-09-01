@@ -104,19 +104,18 @@ function receive(event_id: string, channel: string, callback: (args: any[]) => v
 }
 
 function emit(event_id: string, channel: string, args: any[]) {
-  const data_str = JSON.stringify(args)
-  const str_fragments =
-    data_str.length > MAX_STR_LENGTH ? data_str.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || [] : [data_str]
-  const payloads = str_fragments.map((fragment, index) => {
-    if (str_fragments.length > 1 && index === str_fragments.length - 1) {
-      return { channel: channel, id: ID, data: fragment, index: index, final: true }
-    } else if (str_fragments.length > 1) {
-      return { channel: channel, id: ID, data: fragment, index: index }
-    } else {
+  const str_fragments: string[] = JSON.stringify(args).match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) ?? []
+  const payload_strings = str_fragments
+    .map((fragment, index) => {
+      if (str_fragments.length > 1) {
+        if (index === str_fragments.length - 1) {
+          return { channel: channel, id: ID, data: fragment, index: index, final: true }
+        }
+        return { channel: channel, id: ID, data: fragment, index: index }
+      }
       return { channel: channel, id: ID, data: fragment }
-    }
-  })
-  const payload_strings = payloads.map(payload => Payload.toString(payload))
+    })
+    .map(payload => Payload.toString(payload))
   function* send(strings: string[]) {
     for (const string of strings) {
       world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${encodeURI(string)}`)
