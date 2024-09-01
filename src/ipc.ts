@@ -27,13 +27,13 @@ import { world, system } from '@minecraft/server'
 interface Payload {
   channel: string
   id: number
-  index: number
   data: string
+  index?: number
   final?: boolean
 }
 
 namespace Payload {
-  export type Packed = [string, number, number, string] | [string, number, number, string, number]
+  export type Packed = [string, number, string] | [string, number, string, number] | [string, number, string, number, number]
   export function toString(contents: Payload): string {
     return JSON.stringify(toPacked(contents))
   }
@@ -42,15 +42,27 @@ namespace Payload {
   }
 
   export function toPacked(contents: Payload): Packed {
-    return contents.final !== undefined
-      ? [contents.channel, contents.id, contents.index, contents.data, contents.final ? 1 : 0]
-      : [contents.channel, contents.id, contents.index, contents.data]
+    if (contents.final !== undefined && contents.index !== undefined) {
+      return [contents.channel, contents.id, contents.data, contents.index, contents.final ? 1 : 0]
+    }
+    else if (contents.index !== undefined) {
+      return [contents.channel, contents.id, contents.data, contents.index]
+    }
+    else {
+      return [contents.channel, contents.id, contents.data]
+    }
   }
 
   export function fromPacked(packed: Packed): Payload {
-    return packed[3] !== undefined
-      ? { channel: packed[0], id: packed[1], index: packed[2], data: packed[3], final: packed[4] === 1 }
-      : { channel: packed[0], id: packed[1], index: packed[2], data: packed[3] }
+    if (packed[4] !== undefined && packed[3] !== undefined) {
+      return { channel: packed[0], id: packed[1], data: packed[2], index: packed[3], final: packed[4] === 1 }
+    }
+    else if (packed[3] !== undefined) {
+      return { channel: packed[0], id: packed[1], data: packed[2], index: packed[3] }
+    }
+    else {
+      return { channel: packed[0], id: packed[1], data: packed[2]}
+    }
   }
 }
 
@@ -60,9 +72,15 @@ let ID = 0
 function fragment(channel: string, data: string): Payload[] {
   const fragments = data.length > MAX_STR_LENGTH ? data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || [] : [data]
   return fragments.map((fragment, index) => {
-    return index === fragments.length - 1
-      ? { channel: channel, id: ID, index: index, data: fragment, final: true }
-      : { channel: channel, id: ID, index: index, data: fragment }
+    if (fragments.length > 1 && index === fragments.length -1) {
+      return { channel: channel, id: ID, data: fragment, index: index, final: true }
+    }
+    else if (fragments.length > 1) {
+      return { channel: channel, id: ID, data: fragment, index: index }
+    }
+    else {
+      return { channel: channel, id: ID, data: fragment }
+    }
   })
 }
 
@@ -81,18 +99,22 @@ function receive(id: string, channel: string, callback: (args: any[]) => void) {
   return system.afterEvents.scriptEventReceive.subscribe(
     event => {
       if (event.id === `ipc:${id}`) {
-        const payload = JSON.parse(decodeURIComponent(event.message)) as Payload.Packed
+        const payload = JSON.parse(decodeURI(event.message)) as Payload.Packed
         if (payload[0] === channel) {
           const contents: Payload = Payload.fromPacked(payload)
           if (!buffer.has(contents.id)) {
             buffer.set(contents.id, { size: undefined, payloads: [] })
           }
+
           const fragment = buffer.get(contents.id)
           if (fragment !== undefined) {
-            if (contents.final) {
+            if (contents.final && contents.index !== undefined) {
               fragment.size = contents.index + 1
             }
-            fragment.payloads[contents.index] = contents
+            else if (contents.index === undefined && !(contents.final ?? false)) {
+              fragment.size = 1
+            }
+            fragment.payloads[contents.index ?? 0] = contents
 
             if (fragment.size !== undefined) {
               tryResolve(fragment)
@@ -111,7 +133,7 @@ function emit(id: string, channel: string, args: any[]) {
   payloads.forEach(payload => strings.push(Payload.toString(payload)))
   function* send(strings: string[]) {
     for (const string of strings) {
-      world.getDimension('overworld').runCommand(`scriptevent ipc:${id} ${encodeURIComponent(string)}`)
+      world.getDimension('overworld').runCommand(`scriptevent ipc:${id} ${encodeURI(string)}`)
       yield
     }
   }
