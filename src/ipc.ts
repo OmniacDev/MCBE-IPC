@@ -65,7 +65,7 @@ namespace Payload {
   }
 }
 
-const MAX_STR_LENGTH = 1024
+const MAX_STR_LENGTH = 1536
 let ID = 0
 
 function fragment(channel: string, data: string): Payload[] {
