@@ -68,11 +68,11 @@ namespace Payload {
 const MAX_STR_LENGTH = 1280
 let ID = 0
 
-function receive(type: string, channel: string, callback: (args: any[]) => void) {
+function receive(event_id: string, channel: string, callback: (args: any[]) => void) {
   const buffer = new Map<number, { size: number | undefined; payloads: (Payload | undefined)[] }>()
   return system.afterEvents.scriptEventReceive.subscribe(
     event => {
-      if (event.id === `ipc:${type}`) {
+      if (event.id === `ipc:${event_id}`) {
         const packed: Payload.Packed = JSON.parse(decodeURI(event.message))
         if (packed[0] === channel) {
           const payload: Payload = Payload.fromPacked(packed)
@@ -103,7 +103,7 @@ function receive(type: string, channel: string, callback: (args: any[]) => void)
   )
 }
 
-function emit(type: string, channel: string, args: any[]) {
+function emit(event_id: string, channel: string, args: any[]) {
   const data_str = JSON.stringify(args)
   const str_fragments =
     data_str.length > MAX_STR_LENGTH ? data_str.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || [] : [data_str]
@@ -119,7 +119,7 @@ function emit(type: string, channel: string, args: any[]) {
   const payload_strings = payloads.map(payload => Payload.toString(payload))
   function* send(strings: string[]) {
     for (const string of strings) {
-      world.getDimension('overworld').runCommand(`scriptevent ipc:${type} ${encodeURI(string)}`)
+      world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${encodeURI(string)}`)
       yield
     }
   }
