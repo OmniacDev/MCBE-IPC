@@ -68,52 +68,32 @@ namespace Payload {
 const MAX_STR_LENGTH = 1280
 let ID = 0
 
-function fragment(channel: string, data: string): Payload[] {
-  const fragments = data.length > MAX_STR_LENGTH ? data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || [] : [data]
-  return fragments.map((fragment, index) => {
-    if (fragments.length > 1 && index === fragments.length - 1) {
-      return { channel: channel, id: ID, data: fragment, index: index, final: true }
-    } else if (fragments.length > 1) {
-      return { channel: channel, id: ID, data: fragment, index: index }
-    } else {
-      return { channel: channel, id: ID, data: fragment }
-    }
-  })
-}
-
 function receive(id: string, channel: string, callback: (args: any[]) => void) {
   const buffer = new Map<number, { size: number | undefined; payloads: (Payload | undefined)[] }>()
-  function tryResolve(fragment: { size: number | undefined; payloads: (Payload | undefined)[] }) {
-    if (
-      fragment.payloads.length > 0 &&
-      fragment.payloads.filter(content => content !== null && content !== undefined).length === fragment.size
-    ) {
-      const full_str = fragment.payloads.map(contents => contents?.data).join('')
-
-      callback(JSON.parse(full_str))
-    }
-  }
   return system.afterEvents.scriptEventReceive.subscribe(
     event => {
       if (event.id === `ipc:${id}`) {
-        const payload = JSON.parse(decodeURI(event.message)) as Payload.Packed
-        if (payload[0] === channel) {
-          const contents: Payload = Payload.fromPacked(payload)
-          if (!buffer.has(contents.id)) {
-            buffer.set(contents.id, { size: undefined, payloads: [] })
-          }
-
-          const fragment = buffer.get(contents.id)
+        const packed: Payload.Packed = JSON.parse(decodeURI(event.message))
+        if (packed[0] === channel) {
+          const payload: Payload = Payload.fromPacked(packed)
+          const fragment = buffer.has(payload.id)
+            ? buffer.get(payload.id)
+            : buffer.set(payload.id, { size: undefined, payloads: [] }).get(payload.id)
           if (fragment !== undefined) {
-            if (contents.final && contents.index !== undefined) {
-              fragment.size = contents.index + 1
-            } else if (contents.index === undefined && !(contents.final ?? false)) {
+            if (payload.final && payload.index !== undefined) {
+              fragment.size = payload.index + 1
+            } else if (payload.index === undefined && !(payload.final ?? false)) {
               fragment.size = 1
             }
-            fragment.payloads[contents.index ?? 0] = contents
-
+            fragment.payloads[payload.index ?? 0] = payload
             if (fragment.size !== undefined) {
-              tryResolve(fragment)
+              if (
+                fragment.payloads.length > 0 &&
+                fragment.payloads.filter(content => content !== null && content !== undefined).length === fragment.size
+              ) {
+                const full_str = fragment.payloads.map(contents => contents?.data).join('')
+                callback(JSON.parse(full_str))
+              }
             }
           }
         }
@@ -124,16 +104,26 @@ function receive(id: string, channel: string, callback: (args: any[]) => void) {
 }
 
 function emit(id: string, channel: string, args: any[]) {
-  const strings: string[] = []
-  const payloads: Payload[] = fragment(channel, JSON.stringify(args))
-  payloads.forEach(payload => strings.push(Payload.toString(payload)))
+  const data_str = JSON.stringify(args)
+  const str_fragments =
+    data_str.length > MAX_STR_LENGTH ? data_str.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || [] : [data_str]
+  const payloads = str_fragments.map((fragment, index) => {
+    if (str_fragments.length > 1 && index === str_fragments.length - 1) {
+      return { channel: channel, id: ID, data: fragment, index: index, final: true }
+    } else if (str_fragments.length > 1) {
+      return { channel: channel, id: ID, data: fragment, index: index }
+    } else {
+      return { channel: channel, id: ID, data: fragment }
+    }
+  })
+  const payload_strings = payloads.map(payload => Payload.toString(payload))
   function* send(strings: string[]) {
     for (const string of strings) {
       world.getDimension('overworld').runCommand(`scriptevent ipc:${id} ${encodeURI(string)}`)
       yield
     }
   }
-  system.runJob(send(strings))
+  system.runJob(send(payload_strings))
   ID++
 }
 
