@@ -33,7 +33,10 @@ interface Payload {
 }
 
 namespace Payload {
-  export type Packed = [string, number, string] | [string, number, string, number] | [string, number, string, number, number]
+  export type Packed =
+    | [string, number, string]
+    | [string, number, string, number]
+    | [string, number, string, number, number]
   export function toString(contents: Payload): string {
     return JSON.stringify(toPacked(contents))
   }
@@ -44,11 +47,9 @@ namespace Payload {
   export function toPacked(contents: Payload): Packed {
     if (contents.final !== undefined && contents.index !== undefined) {
       return [contents.channel, contents.id, contents.data, contents.index, contents.final ? 1 : 0]
-    }
-    else if (contents.index !== undefined) {
+    } else if (contents.index !== undefined) {
       return [contents.channel, contents.id, contents.data, contents.index]
-    }
-    else {
+    } else {
       return [contents.channel, contents.id, contents.data]
     }
   }
@@ -56,12 +57,10 @@ namespace Payload {
   export function fromPacked(packed: Packed): Payload {
     if (packed[4] !== undefined && packed[3] !== undefined) {
       return { channel: packed[0], id: packed[1], data: packed[2], index: packed[3], final: packed[4] === 1 }
-    }
-    else if (packed[3] !== undefined) {
+    } else if (packed[3] !== undefined) {
       return { channel: packed[0], id: packed[1], data: packed[2], index: packed[3] }
-    }
-    else {
-      return { channel: packed[0], id: packed[1], data: packed[2]}
+    } else {
+      return { channel: packed[0], id: packed[1], data: packed[2] }
     }
   }
 }
@@ -72,13 +71,11 @@ let ID = 0
 function fragment(channel: string, data: string): Payload[] {
   const fragments = data.length > MAX_STR_LENGTH ? data.match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) || [] : [data]
   return fragments.map((fragment, index) => {
-    if (fragments.length > 1 && index === fragments.length -1) {
+    if (fragments.length > 1 && index === fragments.length - 1) {
       return { channel: channel, id: ID, data: fragment, index: index, final: true }
-    }
-    else if (fragments.length > 1) {
+    } else if (fragments.length > 1) {
       return { channel: channel, id: ID, data: fragment, index: index }
-    }
-    else {
+    } else {
       return { channel: channel, id: ID, data: fragment }
     }
   })
@@ -110,8 +107,7 @@ function receive(id: string, channel: string, callback: (args: any[]) => void) {
           if (fragment !== undefined) {
             if (contents.final && contents.index !== undefined) {
               fragment.size = contents.index + 1
-            }
-            else if (contents.index === undefined && !(contents.final ?? false)) {
+            } else if (contents.index === undefined && !(contents.final ?? false)) {
               fragment.size = 1
             }
             fragment.payloads[contents.index ?? 0] = contents
