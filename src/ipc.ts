@@ -116,13 +116,14 @@ function emit(event_id: string, channel: string, args: any[]) {
       return { channel: channel, id: ID, data: fragment }
     })
     .map(payload => Payload.toString(payload))
-  function* send(strings: string[]) {
-    for (const string of strings) {
-      world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${encodeURI(string)}`)
-      yield
-    }
-  }
-  system.runJob(send(payload_strings))
+  system.runJob(
+    (function* () {
+      for (const string of payload_strings) {
+        world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${encodeURI(string)}`)
+        yield
+      }
+    })()
+  )
   ID++
 }
 
