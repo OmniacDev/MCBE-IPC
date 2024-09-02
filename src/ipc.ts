@@ -79,7 +79,7 @@ namespace IPC {
             if (fragment !== undefined) {
               fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
               fragment.payloads[payload.index ?? 0] = payload
-              if (fragment.size !== undefined) {
+              if (fragment.size !== -1) {
                 if (fragment.payloads.filter(p => p !== null).length === fragment.size) {
                   const full_str = fragment.payloads.map(contents => contents.data).join('')
                   callback(JSON.parse(full_str))
