@@ -24,7 +24,7 @@
 
 import { world, system } from '@minecraft/server'
 
-namespace Core {
+namespace IPC {
   const MAX_STR_LENGTH = 1280
   let ID = 0
 
@@ -41,42 +41,42 @@ namespace Core {
       | [string, number, string]
       | [string, number, string, number]
       | [string, number, string, number, number]
-    export function toString(contents: Payload): string {
-      return JSON.stringify(toPacked(contents))
+    export function toString(c: Payload): string {
+      return JSON.stringify(toPacked(c))
     }
-    export function fromString(string: string): Payload {
-      return fromPacked(JSON.parse(string) as Packed)
+    export function fromString(s: string): Payload {
+      return fromPacked(JSON.parse(s) as Packed)
     }
 
-    export function toPacked(contents: Payload): Packed {
-      if (contents.final !== undefined && contents.index !== undefined) {
-        return [contents.channel, contents.id, contents.data, contents.index, contents.final ? 1 : 0]
-      } else if (contents.index !== undefined) {
-        return [contents.channel, contents.id, contents.data, contents.index]
+    export function toPacked(c: Payload): Packed {
+      if (c.final !== undefined && c.index !== undefined) {
+        return [c.channel, c.id, c.data, c.index, c.final ? 1 : 0]
+      } else if (c.index !== undefined) {
+        return [c.channel, c.id, c.data, c.index]
       } else {
-        return [contents.channel, contents.id, contents.data]
+        return [c.channel, c.id, c.data]
       }
     }
 
-    export function fromPacked(packed: Packed): Payload {
-      if (packed[4] !== undefined && packed[3] !== undefined) {
-        return { channel: packed[0], id: packed[1], data: packed[2], index: packed[3], final: packed[4] === 1 }
-      } else if (packed[3] !== undefined) {
-        return { channel: packed[0], id: packed[1], data: packed[2], index: packed[3] }
+    export function fromPacked(p: Packed): Payload {
+      if (p[4] !== undefined && p[3] !== undefined) {
+        return { channel: p[0], id: p[1], data: p[2], index: p[3], final: p[4] === 1 }
+      } else if (p[3] !== undefined) {
+        return { channel: p[0], id: p[1], data: p[2], index: p[3] }
       } else {
-        return { channel: packed[0], id: packed[1], data: packed[2] }
+        return { channel: p[0], id: p[1], data: p[2] }
       }
     }
   }
 
-  export function receive(event_id: string, channel: string, callback: (args: any[]) => void) {
+  function receive(event_id: string, channel: string, callback: (args: any[]) => void) {
     const buffer = new Map<number, { size: number | undefined; payloads: (Payload | undefined)[] }>()
     return system.afterEvents.scriptEventReceive.subscribe(
       event => {
         if (event.id === `ipc:${event_id}`) {
-          const packed: Payload.Packed = JSON.parse(decodeURI(event.message))
-          if (packed[0] === channel) {
-            const payload: Payload = Payload.fromPacked(packed)
+          const p: Payload.Packed = JSON.parse(decodeURI(event.message))
+          if (p[0] === channel) {
+            const payload: Payload = Payload.fromPacked(p)
             const fragment = buffer.has(payload.id)
               ? buffer.get(payload.id)
               : buffer.set(payload.id, { size: undefined, payloads: [] }).get(payload.id)
@@ -105,7 +105,7 @@ namespace Core {
     )
   }
 
-  export function emit(event_id: string, channel: string, args: any[]) {
+  function emit(event_id: string, channel: string, args: any[]) {
     const str_fragments: string[] = JSON.stringify(args).match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) ?? []
     const payload_strings = str_fragments
       .map((fragment, index) => {
@@ -128,14 +128,12 @@ namespace Core {
     )
     ID++
   }
-}
 
-namespace IPC {
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke(channel: string, ...args: any[]): Promise<any> {
-    Core.emit('invoke', channel, args)
+    emit('invoke', channel, args)
     return new Promise(resolve => {
-      const listener = Core.receive('handle', channel, args => {
+      const listener = receive('handle', channel, args => {
         resolve(args[0])
         system.afterEvents.scriptEventReceive.unsubscribe(listener)
       })
@@ -144,27 +142,27 @@ namespace IPC {
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
   export function handle(channel: string, listener: (...args: any[]) => any) {
-    Core.receive('invoke', channel, args => {
+    receive('invoke', channel, args => {
       const result = listener(...args)
-      Core.emit('handle', channel, [result])
+      emit('handle', channel, [result])
     })
   }
 
   /** Sends a message with `args` to `channel` */
   export function send(channel: string, ...args: any[]): void {
-    Core.emit('send', channel, args)
+    emit('send', channel, args)
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on(channel: string, listener: (...args: any[]) => void) {
-    Core.receive('send', channel, args => {
+    receive('send', channel, args => {
       listener(...args)
     })
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
   export function once(channel: string, listener: (...args: any[]) => void) {
-    const event = Core.receive('send', channel, args => {
+    const event = receive('send', channel, args => {
       listener(...args)
       system.afterEvents.scriptEventReceive.unsubscribe(event)
     })
