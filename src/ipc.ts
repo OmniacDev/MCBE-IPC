@@ -142,9 +142,7 @@ namespace IPC {
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on(channel: string, listener: (...args: any[]) => void) {
-    listen('send', channel, args => {
-      listener(...args)
-    })
+    listen('send', channel, args => listener(...args))
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
