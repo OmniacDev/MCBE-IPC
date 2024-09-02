@@ -41,36 +41,32 @@ namespace IPC {
       | [string, number, string]
       | [string, number, string, number]
       | [string, number, string, number, number]
-    export function toString(c: Payload): string {
-      return JSON.stringify(toPacked(c))
+    export function toString(p: Payload): string {
+      return JSON.stringify(toPacked(p))
     }
     export function fromString(s: string): Payload {
       return fromPacked(JSON.parse(s) as Packed)
     }
 
-    export function toPacked(c: Payload): Packed {
-      if (c.final !== undefined && c.index !== undefined) {
-        return [c.channel, c.id, c.data, c.index, c.final ? 1 : 0]
-      } else if (c.index !== undefined) {
-        return [c.channel, c.id, c.data, c.index]
-      } else {
-        return [c.channel, c.id, c.data]
-      }
+    export function toPacked(p: Payload): Packed {
+      return p.index !== undefined
+        ? p.final !== undefined
+          ? [p.channel, p.id, p.data, p.index, p.final ? 1 : 0]
+          : [p.channel, p.id, p.data, p.index]
+        : [p.channel, p.id, p.data]
     }
 
     export function fromPacked(p: Packed): Payload {
-      if (p[4] !== undefined && p[3] !== undefined) {
-        return { channel: p[0], id: p[1], data: p[2], index: p[3], final: p[4] === 1 }
-      } else if (p[3] !== undefined) {
-        return { channel: p[0], id: p[1], data: p[2], index: p[3] }
-      } else {
-        return { channel: p[0], id: p[1], data: p[2] }
-      }
+      return p[3] !== undefined
+        ? p[4] !== undefined
+          ? { channel: p[0], id: p[1], data: p[2], index: p[3], final: p[4] === 1 }
+          : { channel: p[0], id: p[1], data: p[2], index: p[3] }
+        : { channel: p[0], id: p[1], data: p[2] }
     }
   }
 
   function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
-    const buffer = new Map<number, { size: number | undefined; payloads: (Payload | undefined)[] }>()
+    const buffer = new Map<number, { size: number; payloads: Payload[] }>()
     return system.afterEvents.scriptEventReceive.subscribe(
       event => {
         if (event.id === `ipc:${event_id}`) {
@@ -79,22 +75,15 @@ namespace IPC {
             const payload: Payload = Payload.fromPacked(p)
             const fragment = buffer.has(payload.id)
               ? buffer.get(payload.id)
-              : buffer.set(payload.id, { size: undefined, payloads: [] }).get(payload.id)
+              : buffer.set(payload.id, { size: -1, payloads: [] }).get(payload.id)
             if (fragment !== undefined) {
-              if (payload.final && payload.index !== undefined) {
-                fragment.size = payload.index + 1
-              } else if (payload.index === undefined && !(payload.final ?? false)) {
-                fragment.size = 1
-              }
+              fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
               fragment.payloads[payload.index ?? 0] = payload
               if (fragment.size !== undefined) {
-                if (
-                  fragment.payloads.length > 0 &&
-                  fragment.payloads.filter(content => content !== null && content !== undefined).length ===
-                    fragment.size
-                ) {
-                  const full_str = fragment.payloads.map(contents => contents?.data).join('')
+                if (fragment.payloads.filter(p => p !== null).length === fragment.size) {
+                  const full_str = fragment.payloads.map(contents => contents.data).join('')
                   callback(JSON.parse(full_str))
+                  buffer.delete(payload.id)
                 }
               }
             }
@@ -106,16 +95,14 @@ namespace IPC {
   }
 
   function emit(event_id: string, channel: string, args: any[]) {
-    const str_fragments: string[] = JSON.stringify(args).match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) ?? []
-    const payload_strings = str_fragments
-      .map((fragment, index) => {
-        if (str_fragments.length > 1) {
-          if (index === str_fragments.length - 1) {
-            return { channel: channel, id: ID, data: fragment, index: index, final: true }
-          }
-          return { channel: channel, id: ID, data: fragment, index: index }
-        }
-        return { channel: channel, id: ID, data: fragment }
+    const data_fragments: string[] = JSON.stringify(args).match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) ?? []
+    const payload_strings = data_fragments
+      .map((data, index) => {
+        return data_fragments.length > 1
+          ? index === data_fragments.length - 1
+            ? { channel: channel, id: ID, data: data, index: index, final: true }
+            : { channel: channel, id: ID, data: data, index: index }
+          : { channel: channel, id: ID, data: data }
       })
       .map(payload => Payload.toString(payload))
     system.runJob(
