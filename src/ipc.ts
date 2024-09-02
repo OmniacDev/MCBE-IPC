@@ -69,7 +69,7 @@ namespace IPC {
     }
   }
 
-  function receive(event_id: string, channel: string, callback: (args: any[]) => void) {
+  function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
     const buffer = new Map<number, { size: number | undefined; payloads: (Payload | undefined)[] }>()
     return system.afterEvents.scriptEventReceive.subscribe(
       event => {
@@ -133,7 +133,7 @@ namespace IPC {
   export function invoke(channel: string, ...args: any[]): Promise<any> {
     emit('invoke', channel, args)
     return new Promise(resolve => {
-      const listener = receive('handle', channel, args => {
+      const listener = listen('handle', channel, args => {
         resolve(args[0])
         system.afterEvents.scriptEventReceive.unsubscribe(listener)
       })
@@ -142,7 +142,7 @@ namespace IPC {
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
   export function handle(channel: string, listener: (...args: any[]) => any) {
-    receive('invoke', channel, args => {
+    listen('invoke', channel, args => {
       const result = listener(...args)
       emit('handle', channel, [result])
     })
@@ -155,14 +155,14 @@ namespace IPC {
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on(channel: string, listener: (...args: any[]) => void) {
-    receive('send', channel, args => {
+    listen('send', channel, args => {
       listener(...args)
     })
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
   export function once(channel: string, listener: (...args: any[]) => void) {
-    const event = receive('send', channel, args => {
+    const event = listen('send', channel, args => {
       listener(...args)
       system.afterEvents.scriptEventReceive.unsubscribe(event)
     })
