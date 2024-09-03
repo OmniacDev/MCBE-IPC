@@ -27,6 +27,7 @@ import { world, system } from '@minecraft/server'
 namespace IPC {
   const MAX_STR_LENGTH = 1280
   let ID = 0
+  let UUID: string
 
   interface Payload {
     channel: string
@@ -114,6 +115,33 @@ namespace IPC {
       })()
     )
     ID++
+  }
+
+  export function handshake(to_uuid: string, timeout: number = 20): Promise<boolean> {
+    emit('handshake', 'SYN', [to_uuid, UUID])
+    return new Promise(resolve => {
+      const run_timeout = system.runTimeout(() => {
+        resolve(false)
+        system.afterEvents.scriptEventReceive.unsubscribe(listener)
+        system.clearRun(run_timeout)
+      }, timeout)
+      const listener = listen('handshake', 'ACK', args => {
+        if (args[0] === UUID && args[1] === to_uuid) {
+          resolve(true)
+          system.afterEvents.scriptEventReceive.unsubscribe(listener)
+          system.clearRun(run_timeout)
+        }
+      })
+    })
+  }
+
+  export function init(uuid: string) {
+    UUID = uuid
+    listen('handshake', 'SYN', args => {
+      if (args[0] === UUID) {
+        emit('handshake', 'ACK', [args[1], UUID])
+      }
+    })
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
