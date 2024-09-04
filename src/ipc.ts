@@ -29,30 +29,30 @@ namespace IPC {
   let ID = 0
 
   export class Connection {
-    readonly #from: string
-    readonly #to: string
+    private readonly _from: string
+    private readonly _to: string
 
     get from() {
-      return this.#from
+      return this._from
     }
 
     get to() {
-      return this.#to
+      return this._to
     }
 
     constructor(from: string, to: string) {
-      this.#from = from
-      this.#to = to
+      this._from = from
+      this._to = to
     }
 
     send(channel: string, ...args: any[]): void {
-      emit('send', `${this.#to}:${channel}`, [this.#from, args])
+      emit('send', `${this._to}:${channel}`, [this._from, args])
     }
 
     invoke(channel: string, ...args: any[]): Promise<any> {
-      emit('invoke', `${this.#to}:${channel}`, [this.#from, args])
+      emit('invoke', `${this._to}:${channel}`, [this._from, args])
       return new Promise(resolve => {
-        const listener = listen('handle', `${this.#from}:${channel}`, args => {
+        const listener = listen('handle', `${this._from}:${channel}`, args => {
           resolve(args[1])
           system.afterEvents.scriptEventReceive.unsubscribe(listener)
         })
@@ -61,17 +61,17 @@ namespace IPC {
   }
 
   export class ConnectionManager {
-    readonly #id: string
+    private readonly _id: string
 
     get id() {
-      return this.#id
+      return this._id
     }
 
     constructor(id: string) {
-      this.#id = id
+      this._id = id
 
-      listen('handshake', `${this.#id}:SYN`, args => {
-        emit('handshake', `${args[0]}:ACK`, [this.#id])
+      listen('handshake', `${this._id}:SYN`, args => {
+        emit('handshake', `${args[0]}:ACK`, [this._id])
       })
     }
 
@@ -79,7 +79,7 @@ namespace IPC {
       return new Promise<Connection>((resolve, reject) => {
         this.handshake(to, timeout).then(success => {
           if (success) {
-            resolve(new Connection(this.#id, to))
+            resolve(new Connection(this._id, to))
           } else {
             reject()
           }
@@ -88,32 +88,32 @@ namespace IPC {
     }
 
     handle(channel: string, listener: (...args: any[]) => any) {
-      listen('invoke', `${this.#id}:${channel}`, args => {
+      listen('invoke', `${this._id}:${channel}`, args => {
         const result = listener(...args[1])
-        emit('handle', `${args[0]}:${channel}`, [this.#id, [result]])
+        emit('handle', `${args[0]}:${channel}`, [this._id, [result]])
       })
     }
 
     on(channel: string, listener: (...args: any[]) => void) {
-      listen('send', `${this.#id}:${channel}`, args => listener(...args[1]))
+      listen('send', `${this._id}:${channel}`, args => listener(...args[1]))
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
-      const event = listen('send', `${this.#id}:${channel}`, args => {
+      const event = listen('send', `${this._id}:${channel}`, args => {
         listener(...args[1])
         system.afterEvents.scriptEventReceive.unsubscribe(event)
       })
     }
 
     private handshake(receiver: string, timeout: number = 20): Promise<boolean> {
-      emit('handshake', `${receiver}:SYN`, [this.#id])
+      emit('handshake', `${receiver}:SYN`, [this._id])
       return new Promise(resolve => {
         const run_timeout = system.runTimeout(() => {
           resolve(false)
           system.afterEvents.scriptEventReceive.unsubscribe(listener)
           system.clearRun(run_timeout)
         }, timeout)
-        const listener = listen('handshake', `${this.#id}:ACK`, args => {
+        const listener = listen('handshake', `${this._id}:ACK`, args => {
           if (args[0] === receiver) {
             resolve(true)
             system.afterEvents.scriptEventReceive.unsubscribe(listener)
