@@ -90,7 +90,7 @@ namespace IPC {
     handle(channel: string, listener: (...args: any[]) => any) {
       listen('invoke', `${this._id}:${channel}`, args => {
         const result = listener(...args[1])
-        emit('handle', `${args[0]}:${channel}`, [this._id, [result]])
+        emit('handle', `${args[0]}:${channel}`, [this._id, result])
       })
     }
 
