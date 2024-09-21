@@ -29,16 +29,16 @@ namespace IPC {
     export const PRIME: number = 19893121
     export const MOD: number = 341
 
-    export function generate_secret(): number {
-      return Math.floor(Math.random() * (MOD - 1)) + 1
+    export function generate_secret(mod: number = MOD): number {
+      return Math.floor(Math.random() * (mod - 1)) + 1
     }
 
-    export function generate_public(secret: number): string {
-      return mod_exp(MOD, secret, PRIME).toString(36).toUpperCase()
+    export function generate_public(secret: number, mod: number = MOD, prime: number = PRIME): string {
+      return mod_exp(mod, secret, prime).toString(36).toUpperCase()
     }
 
-    export function generate_shared(secret: number, other_key: string): string {
-      return mod_exp(parseInt(other_key, 36), secret, PRIME).toString(36).toUpperCase()
+    export function generate_shared(secret: number, other_key: string, prime: number = PRIME): string {
+      return mod_exp(parseInt(other_key, 36), secret, prime).toString(36).toUpperCase()
     }
 
     function mod_exp(base: number, exp: number, mod: number): number {
@@ -70,7 +70,6 @@ namespace IPC {
     get to() {
       return this._to
     }
-    
 
     constructor(from: string, to: string, shared_key: string) {
       this._from = from
@@ -104,12 +103,12 @@ namespace IPC {
     constructor(id: string) {
       this._id = id
       this._connection_secrets = new Map<string, string>()
-      
+
       listen('handshake', `${this._id}:SYN`, args => {
-        const secret = ENCRYPTION.generate_secret()
-        const public_key = ENCRYPTION.generate_public(secret)
-        this._connection_secrets.set(args[0], ENCRYPTION.generate_shared(secret, args[1]))
-        
+        const secret = ENCRYPTION.generate_secret(args[3])
+        const public_key = ENCRYPTION.generate_public(secret, args[3], args[2])
+        this._connection_secrets.set(args[0], ENCRYPTION.generate_shared(secret, args[1], args[2]))
+
         emit('handshake', `${args[0]}:ACK`, [this._id, public_key])
       })
     }
@@ -117,8 +116,8 @@ namespace IPC {
     connect(to: string, timeout: number = 20): Promise<Connection> {
       const secret = ENCRYPTION.generate_secret()
       const public_key = ENCRYPTION.generate_public(secret)
-      
-      emit('handshake', `${to}:SYN`, [this._id, public_key])
+
+      emit('handshake', `${to}:SYN`, [this._id, public_key, ENCRYPTION.PRIME, ENCRYPTION.MOD])
       return new Promise((resolve, reject) => {
         const run_timeout = system.runTimeout(() => {
           reject()
