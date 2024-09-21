@@ -25,12 +25,45 @@
 import { world, system } from '@minecraft/server'
 
 namespace IPC {
+  namespace ENCRYPTION {
+    export const PRIME: number = 19893121
+    export const MOD: number = 341
+
+    export function generate_secret(): number {
+      return Math.floor(Math.random() * (MOD - 1)) + 1
+    }
+
+    export function generate_public(secret: number): string {
+      return (mod_exp(MOD, secret, PRIME)).toString(36).toUpperCase()
+    }
+
+    export function generate_shared(secret: number,  other_key: string): string {
+      return (mod_exp(parseInt(other_key, 36), secret, PRIME)).toString(36).toUpperCase();
+    }
+
+    function mod_exp(base: number, exp: number, mod: number): number {
+      let result = 1;
+      base = base % mod;
+      while (exp > 0) {
+        if (exp % 2 === 1) {
+          result = (result * base) % mod;
+        }
+        exp = Math.floor(exp / 2);
+        base = (base * base) % mod;
+      }
+      return result;
+    }
+  }
+  
   const MAX_STR_LENGTH = 1280
   let ID = 0
-
+  
   export class Connection {
     private readonly _from: string
     private readonly _to: string
+    
+    private readonly _secret: number
+    private readonly _public: string
 
     get from() {
       return this._from
@@ -39,10 +72,17 @@ namespace IPC {
     get to() {
       return this._to
     }
+    
+    get public() {
+      return this._public
+    }
 
     constructor(from: string, to: string) {
       this._from = from
       this._to = to
+
+      this._secret = ENCRYPTION.generate_secret();
+      this._public = ENCRYPTION.generate_public(this._secret);
     }
 
     send(channel: string, ...args: any[]): void {
@@ -62,24 +102,37 @@ namespace IPC {
 
   export class ConnectionManager {
     private readonly _id: string
+    private readonly _connection_secrets: Map<string, string>
+    
+    private readonly _secret: number
+    private readonly _public: string
 
     get id() {
       return this._id
     }
+    
+    get public() {
+      return this._public
+    }
 
     constructor(id: string) {
       this._id = id
+      this._connection_secrets = new Map<string, string>()
+      this._secret = ENCRYPTION.generate_secret()
+      this._public = ENCRYPTION.generate_public(this._secret)
 
       listen('handshake', `${this._id}:SYN`, args => {
-        emit('handshake', `${args[0]}:ACK`, [this._id])
+        emit('handshake', `${args[0]}:ACK`, [this._id, this._public])
+        this._connection_secrets.set(args[0], ENCRYPTION.generate_shared(this._secret, args[1]))
       })
     }
 
     connect(to: string, timeout?: number): Promise<Connection> {
       return new Promise<Connection>((resolve, reject) => {
-        this.handshake(to, timeout).then(success => {
+        const connection = new Connection(this._id, to)
+        this.handshake(to, connection.public, timeout).then(success => {
           if (success) {
-            resolve(new Connection(this._id, to))
+            resolve(connection)
           } else {
             reject()
           }
@@ -105,8 +158,8 @@ namespace IPC {
       })
     }
 
-    private handshake(receiver: string, timeout: number = 20): Promise<boolean> {
-      emit('handshake', `${receiver}:SYN`, [this._id])
+    private handshake(receiver: string, public_key: string, timeout: number = 20): Promise<boolean> {
+      emit('handshake', `${receiver}:SYN`, [this._id, public_key])
       return new Promise(resolve => {
         const run_timeout = system.runTimeout(() => {
           resolve(false)
@@ -115,6 +168,8 @@ namespace IPC {
         }, timeout)
         const listener = listen('handshake', `${this._id}:ACK`, args => {
           if (args[0] === receiver) {
+            this._connection_secrets.set(args[0], ENCRYPTION.generate_shared(this._secret, args[1]))
+            
             resolve(true)
             system.afterEvents.scriptEventReceive.unsubscribe(listener)
             system.clearRun(run_timeout)
