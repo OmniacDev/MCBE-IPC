@@ -25,19 +25,43 @@
 import { world, system } from '@minecraft/server'
 
 namespace IPC {
+  let ID = 0
+  
+  export namespace CONFIG {
+    export namespace ENCRYPTION {
+      /**
+       * @description Used to generate secrets, must be a prime number
+       * @default 19893121
+       * @warning Modify only if you know what you're doing, incorrect values can cause issues
+       */
+      export let PRIME: number = 19893121
+      /**
+       * @description Used to generate secrets, must be a prime root of {@link PRIME}
+       * @default 341
+       * @warning Modify only if you know what you're doing, incorrect values can cause issues
+       */
+      export let MOD: number = 341
+    }
+    export namespace FRAGMENTATION {
+      /**
+       * @description Used when fragmenting data strings
+       * @default 1024
+       * @warning Modify only if you know what you're doing, incorrect values can cause issues
+       */
+      export let MAX_STR_LENGTH: number = 1024
+    }
+  }
+  
   namespace ENCRYPTION {
-    export const PRIME: number = 19893121
-    export const MOD: number = 341
-
-    export function generate_secret(mod: number = MOD): number {
+    export function generate_secret(mod: number = CONFIG.ENCRYPTION.MOD): number {
       return Math.floor(Math.random() * (mod - 1)) + 1
     }
 
-    export function generate_public(secret: number, mod: number = MOD, prime: number = PRIME): string {
+    export function generate_public(secret: number, mod: number = CONFIG.ENCRYPTION.MOD, prime: number = CONFIG.ENCRYPTION.PRIME): string {
       return mod_exp(mod, secret, prime).toString(36).toUpperCase()
     }
 
-    export function generate_shared(secret: number, other_key: string, prime: number = PRIME): string {
+    export function generate_shared(secret: number, other_key: string, prime: number = CONFIG.ENCRYPTION.PRIME): string {
       return mod_exp(parseInt(other_key, 36), secret, prime).toString(36).toUpperCase()
     }
 
@@ -70,9 +94,6 @@ namespace IPC {
       return result
     }
   }
-
-  const MAX_STR_LENGTH = 1024
-  let ID = 0
 
   export class Connection {
     private readonly _from: string
@@ -143,7 +164,7 @@ namespace IPC {
     connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
       const secret = ENCRYPTION.generate_secret()
       const public_key = ENCRYPTION.generate_public(secret)
-      emit('handshake', `${to}:SYN`, [this._id, encrypted ? 1 : 0, public_key, ENCRYPTION.PRIME, ENCRYPTION.MOD])
+      emit('handshake', `${to}:SYN`, [this._id, encrypted ? 1 : 0, public_key, CONFIG.ENCRYPTION.PRIME, CONFIG.ENCRYPTION.MOD])
       return new Promise((resolve, reject) => {
         const run_timeout = system.runTimeout(() => {
           reject()
@@ -262,7 +283,7 @@ namespace IPC {
   }
 
   function emit(event_id: string, channel: string, args: any[]) {
-    const data_fragments: string[] = JSON.stringify(args).match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) ?? []
+    const data_fragments: string[] = JSON.stringify(args).match(new RegExp(`.{1,${CONFIG.FRAGMENTATION.MAX_STR_LENGTH}}`, 'g')) ?? []
     const payload_strings = data_fragments
       .map((data, index) => {
         return data_fragments.length > 1
