@@ -25,7 +25,7 @@
 import { world, system } from '@minecraft/server'
 
 namespace IPC {
-  const MAX_STR_LENGTH = 1280
+  const MAX_STR_LENGTH = 1024
   let ID = 0
 
   export class Connection {
