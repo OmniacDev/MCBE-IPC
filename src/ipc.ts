@@ -41,6 +41,22 @@ namespace IPC {
       return mod_exp(parseInt(other_key, 36), secret, prime).toString(36).toUpperCase()
     }
 
+    export function encrypt(raw: string, key: string): string {
+      let encrypted = ''
+      for (let i = 0; i < raw.length; i++) {
+        encrypted += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+      }
+      return encrypted
+    }
+
+    export function decrypt(encrypted: string, key: string): string {
+      let decrypted = ''
+      for (let i = 0; i < encrypted.length; i++) {
+        decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+      }
+      return decrypted
+    }
+
     function mod_exp(base: number, exp: number, mod: number): number {
       let result = 1
       base = base % mod
@@ -78,14 +94,22 @@ namespace IPC {
     }
 
     send(channel: string, ...args: any[]): void {
-      emit('send', `${this._to}:${channel}`, [this._from, args])
+      emit('send', `${this._to}:${channel}`, [
+        this._from,
+        this._encryption !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._encryption) : args
+      ])
     }
 
     invoke(channel: string, ...args: any[]): Promise<any> {
-      emit('invoke', `${this._to}:${channel}`, [this._from, args])
+      emit('invoke', `${this._to}:${channel}`, [
+        this._from,
+        this._encryption !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._encryption) : args
+      ])
       return new Promise(resolve => {
         const listener = listen('handle', `${this._from}:${channel}`, args => {
-          resolve(args[1])
+          resolve(
+            this._encryption !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._encryption)) : args[1]
+          )
           system.afterEvents.scriptEventReceive.unsubscribe(listener)
         })
       })
@@ -144,18 +168,28 @@ namespace IPC {
 
     handle(channel: string, listener: (...args: any[]) => any) {
       listen('invoke', `${this._id}:${channel}`, args => {
-        const result = listener(...args[1])
-        emit('handle', `${args[0]}:${channel}`, [this._id, result])
+        const encryption = this._encryption_map.get(args[0]) as string | false
+        const result = listener(
+          ...(encryption !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, encryption)) : args[1])
+        )
+        emit('handle', `${args[0]}:${channel}`, [
+          this._id,
+          encryption !== false ? ENCRYPTION.encrypt(JSON.stringify(result), encryption) : result
+        ])
       })
     }
 
     on(channel: string, listener: (...args: any[]) => void) {
-      listen('send', `${this._id}:${channel}`, args => listener(...args[1]))
+      listen('send', `${this._id}:${channel}`, args => {
+        const encryption = this._encryption_map.get(args[0]) as string | false
+        listener(...(encryption !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, encryption)) : args[1]))
+      })
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
       const event = listen('send', `${this._id}:${channel}`, args => {
-        listener(...args[1])
+        const encryption = this._encryption_map.get(args[0]) as string | false
+        listener(...(encryption !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, encryption)) : args[1]))
         system.afterEvents.scriptEventReceive.unsubscribe(event)
       })
     }
