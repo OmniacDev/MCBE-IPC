@@ -92,12 +92,6 @@ namespace IPC {
     }
   }
 
-  type SYNArgs =
-    | [string, 0, string, number, number] /* encryption not required */
-    | [string, 1, string, number, number] /* encryption required */
-
-  type ACKArgs = [string, 0, string] /* encryption not required */ | [string, 1, string] /* encryption required */
-
   export class ConnectionManager {
     private readonly _id: string
     private readonly _encryption_map: Map<string, string | false>
@@ -111,7 +105,6 @@ namespace IPC {
       this._id = id
       this._encryption_map = new Map<string, string | false>()
       this._force_encryption = force_encryption
-
       listen('handshake', `${this._id}:SYN`, args => {
         const secret = ENCRYPTION.generate_secret(args[4])
         const public_key = ENCRYPTION.generate_public(secret, args[4], args[3])
@@ -119,30 +112,20 @@ namespace IPC {
           args[0],
           args[1] === 1 || this._force_encryption ? ENCRYPTION.generate_shared(secret, args[2], args[3]) : false
         )
-
-        emit('handshake', `${args[0]}:ACK`, [this._id, this._force_encryption ? 1 : 0, public_key] as ACKArgs)
+        emit('handshake', `${args[0]}:ACK`, [this._id, this._force_encryption ? 1 : 0, public_key])
       })
     }
 
     connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
       const secret = ENCRYPTION.generate_secret()
       const public_key = ENCRYPTION.generate_public(secret)
-
-      emit('handshake', `${to}:SYN`, [
-        this._id,
-        encrypted ? 1 : 0,
-        public_key,
-        ENCRYPTION.PRIME,
-        ENCRYPTION.MOD
-      ] as SYNArgs)
-
+      emit('handshake', `${to}:SYN`, [this._id, encrypted ? 1 : 0, public_key, ENCRYPTION.PRIME, ENCRYPTION.MOD])
       return new Promise((resolve, reject) => {
         const run_timeout = system.runTimeout(() => {
           reject()
           system.afterEvents.scriptEventReceive.unsubscribe(listener)
           system.clearRun(run_timeout)
         }, timeout)
-
         const listener = listen('handshake', `${this._id}:ACK`, args => {
           if (args[0] === to) {
             resolve(
