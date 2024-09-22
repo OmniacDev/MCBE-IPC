@@ -61,7 +61,7 @@ namespace IPC {
   export class Connection {
     private readonly _from: string
     private readonly _to: string
-    private readonly _shared_key: string
+    private readonly _encryption: string | false
 
     get from() {
       return this._from
@@ -71,10 +71,10 @@ namespace IPC {
       return this._to
     }
 
-    constructor(from: string, to: string, shared_key: string) {
+    constructor(from: string, to: string, encryption: string | false) {
       this._from = from
       this._to = to
-      this._shared_key = shared_key
+      this._encryption = encryption
     }
 
     send(channel: string, ...args: any[]): void {
@@ -92,41 +92,66 @@ namespace IPC {
     }
   }
 
+  type SYNArgs =
+    | [string, 0, string, number, number] /* encryption not required */
+    | [string, 1, string, number, number] /* encryption required */
+
+  type ACKArgs = [string, 0, string] /* encryption not required */ | [string, 1, string] /* encryption required */
+
   export class ConnectionManager {
     private readonly _id: string
-    private readonly _connection_secrets: Map<string, string>
+    private readonly _encryption_map: Map<string, string | false>
+    private readonly _force_encryption: boolean
 
     get id() {
       return this._id
     }
 
-    constructor(id: string) {
+    constructor(id: string, force_encryption: boolean = false) {
       this._id = id
-      this._connection_secrets = new Map<string, string>()
+      this._encryption_map = new Map<string, string | false>()
+      this._force_encryption = force_encryption
 
       listen('handshake', `${this._id}:SYN`, args => {
-        const secret = ENCRYPTION.generate_secret(args[3])
-        const public_key = ENCRYPTION.generate_public(secret, args[3], args[2])
-        this._connection_secrets.set(args[0], ENCRYPTION.generate_shared(secret, args[1], args[2]))
+        const secret = ENCRYPTION.generate_secret(args[4])
+        const public_key = ENCRYPTION.generate_public(secret, args[4], args[3])
+        this._encryption_map.set(
+          args[0],
+          args[1] === 1 || this._force_encryption ? ENCRYPTION.generate_shared(secret, args[2], args[3]) : false
+        )
 
-        emit('handshake', `${args[0]}:ACK`, [this._id, public_key])
+        emit('handshake', `${args[0]}:ACK`, [this._id, this._force_encryption ? 1 : 0, public_key] as ACKArgs)
       })
     }
 
-    connect(to: string, timeout: number = 20): Promise<Connection> {
+    connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
       const secret = ENCRYPTION.generate_secret()
       const public_key = ENCRYPTION.generate_public(secret)
 
-      emit('handshake', `${to}:SYN`, [this._id, public_key, ENCRYPTION.PRIME, ENCRYPTION.MOD])
+      emit('handshake', `${to}:SYN`, [
+        this._id,
+        encrypted ? 1 : 0,
+        public_key,
+        ENCRYPTION.PRIME,
+        ENCRYPTION.MOD
+      ] as SYNArgs)
+
       return new Promise((resolve, reject) => {
         const run_timeout = system.runTimeout(() => {
           reject()
           system.afterEvents.scriptEventReceive.unsubscribe(listener)
           system.clearRun(run_timeout)
         }, timeout)
+
         const listener = listen('handshake', `${this._id}:ACK`, args => {
           if (args[0] === to) {
-            resolve(new Connection(this._id, to, ENCRYPTION.generate_shared(secret, args[1])))
+            resolve(
+              new Connection(
+                this._id,
+                to,
+                args[1] === 1 || encrypted ? ENCRYPTION.generate_shared(secret, args[2]) : false
+              )
+            )
             system.afterEvents.scriptEventReceive.unsubscribe(listener)
             system.clearRun(run_timeout)
           }
