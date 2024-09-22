@@ -26,7 +26,7 @@ import { world, system } from '@minecraft/server'
 
 namespace IPC {
   let ID = 0
-  
+
   export namespace CONFIG {
     export namespace ENCRYPTION {
       /**
@@ -51,17 +51,25 @@ namespace IPC {
       export let MAX_STR_LENGTH: number = 1024
     }
   }
-  
+
   namespace ENCRYPTION {
     export function generate_secret(mod: number = CONFIG.ENCRYPTION.MOD): number {
       return Math.floor(Math.random() * (mod - 1)) + 1
     }
 
-    export function generate_public(secret: number, mod: number = CONFIG.ENCRYPTION.MOD, prime: number = CONFIG.ENCRYPTION.PRIME): string {
+    export function generate_public(
+      secret: number,
+      mod: number = CONFIG.ENCRYPTION.MOD,
+      prime: number = CONFIG.ENCRYPTION.PRIME
+    ): string {
       return mod_exp(mod, secret, prime).toString(36).toUpperCase()
     }
 
-    export function generate_shared(secret: number, other_key: string, prime: number = CONFIG.ENCRYPTION.PRIME): string {
+    export function generate_shared(
+      secret: number,
+      other_key: string,
+      prime: number = CONFIG.ENCRYPTION.PRIME
+    ): string {
       return mod_exp(parseInt(other_key, 36), secret, prime).toString(36).toUpperCase()
     }
 
@@ -164,7 +172,13 @@ namespace IPC {
     connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
       const secret = ENCRYPTION.generate_secret()
       const public_key = ENCRYPTION.generate_public(secret)
-      emit('handshake', `${to}:SYN`, [this._id, encrypted ? 1 : 0, public_key, CONFIG.ENCRYPTION.PRIME, CONFIG.ENCRYPTION.MOD])
+      emit('handshake', `${to}:SYN`, [
+        this._id,
+        encrypted ? 1 : 0,
+        public_key,
+        CONFIG.ENCRYPTION.PRIME,
+        CONFIG.ENCRYPTION.MOD
+      ])
       return new Promise((resolve, reject) => {
         const run_timeout = system.runTimeout(() => {
           reject()
@@ -283,7 +297,8 @@ namespace IPC {
   }
 
   function emit(event_id: string, channel: string, args: any[]) {
-    const data_fragments: string[] = JSON.stringify(args).match(new RegExp(`.{1,${CONFIG.FRAGMENTATION.MAX_STR_LENGTH}}`, 'g')) ?? []
+    const data_fragments: string[] =
+      JSON.stringify(args).match(new RegExp(`.{1,${CONFIG.FRAGMENTATION.MAX_STR_LENGTH}}`, 'g')) ?? []
     const payload_strings = data_fragments
       .map((data, index) => {
         return data_fragments.length > 1
