@@ -25,12 +25,95 @@
 import { world, system } from '@minecraft/server'
 
 namespace IPC {
-  const MAX_STR_LENGTH = 1024
   let ID = 0
+
+  export namespace CONFIG {
+    export namespace ENCRYPTION {
+      /**
+       * @description Used to generate secrets, must be a prime number
+       * @default 19893121
+       * @warning Modify only if you know what you're doing, incorrect values can cause issues
+       */
+      export let PRIME: number = 19893121
+      /**
+       * @description Used to generate secrets, must be a prime root of {@link PRIME}
+       * @default 341
+       * @warning Modify only if you know what you're doing, incorrect values can cause issues
+       */
+      export let MOD: number = 341
+    }
+    export namespace FRAGMENTATION {
+      /**
+       * @description Used when fragmenting data strings
+       * @default 1024
+       * @warning Modify only if you know what you're doing, incorrect values can cause issues
+       */
+      export let MAX_STR_LENGTH: number = 1024
+    }
+  }
+
+  namespace ENCRYPTION {
+    export function generate_secret(mod: number = CONFIG.ENCRYPTION.MOD): number {
+      return Math.floor(Math.random() * (mod - 1)) + 1
+    }
+
+    export function generate_public(
+      secret: number,
+      mod: number = CONFIG.ENCRYPTION.MOD,
+      prime: number = CONFIG.ENCRYPTION.PRIME
+    ): string {
+      return HEX(mod_exp(mod, secret, prime))
+    }
+
+    export function generate_shared(
+      secret: number,
+      other_key: string,
+      prime: number = CONFIG.ENCRYPTION.PRIME
+    ): string {
+      return HEX(mod_exp(NUM(other_key), secret, prime))
+    }
+
+    export function encrypt(raw: string, key: string): string {
+      let encrypted = ''
+      for (let i = 0; i < raw.length; i++) {
+        encrypted += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+      }
+      return encrypted
+    }
+
+    export function decrypt(encrypted: string, key: string): string {
+      let decrypted = ''
+      for (let i = 0; i < encrypted.length; i++) {
+        decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+      }
+      return decrypted
+    }
+
+    function mod_exp(base: number, exp: number, mod: number): number {
+      let result = 1
+      base = base % mod
+      while (exp > 0) {
+        if (exp % 2 === 1) {
+          result = (result * base) % mod
+        }
+        exp = Math.floor(exp / 2)
+        base = (base * base) % mod
+      }
+      return result
+    }
+
+    function HEX(num: number): string {
+      return num.toString(16).toUpperCase()
+    }
+    function NUM(hex: string): number {
+      return parseInt(hex, 16)
+    }
+  }
 
   export class Connection {
     private readonly _from: string
     private readonly _to: string
+    private readonly _enc: string | false
 
     get from() {
       return this._from
@@ -40,20 +123,24 @@ namespace IPC {
       return this._to
     }
 
-    constructor(from: string, to: string) {
+    constructor(from: string, to: string, encryption: string | false) {
       this._from = from
       this._to = to
+      this._enc = encryption
     }
 
     send(channel: string, ...args: any[]): void {
-      emit('send', `${this._to}:${channel}`, [this._from, args])
+      const data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._enc) : args
+      emit('send', `${this._to}:${channel}`, [this._from, data])
     }
 
     invoke(channel: string, ...args: any[]): Promise<any> {
-      emit('invoke', `${this._to}:${channel}`, [this._from, args])
+      const data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._enc) : args
+      emit('invoke', `${this._to}:${channel}`, [this._from, data])
       return new Promise(resolve => {
         const listener = listen('handle', `${this._from}:${channel}`, args => {
-          resolve(args[1])
+          const data = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._enc)) : args[1]
+          resolve(data)
           system.afterEvents.scriptEventReceive.unsubscribe(listener)
         })
       })
@@ -62,26 +149,45 @@ namespace IPC {
 
   export class ConnectionManager {
     private readonly _id: string
+    private readonly _enc_map: Map<string, string | false>
+    private readonly _enc_force: boolean
 
     get id() {
       return this._id
     }
 
-    constructor(id: string) {
+    constructor(id: string, force_encryption: boolean = false) {
       this._id = id
-
+      this._enc_map = new Map<string, string | false>()
+      this._enc_force = force_encryption
       listen('handshake', `${this._id}:SYN`, args => {
-        emit('handshake', `${args[0]}:ACK`, [this._id])
+        const secret = ENCRYPTION.generate_secret(args[4])
+        const public_key = ENCRYPTION.generate_public(secret, args[4], args[3])
+        const enc = args[1] === 1 || this._enc_force ? ENCRYPTION.generate_shared(secret, args[2], args[3]) : false
+        this._enc_map.set(args[0], enc)
+        emit('handshake', `${args[0]}:ACK`, [this._id, this._enc_force ? 1 : 0, public_key])
       })
     }
 
-    connect(to: string, timeout?: number): Promise<Connection> {
-      return new Promise<Connection>((resolve, reject) => {
-        this.handshake(to, timeout).then(success => {
-          if (success) {
-            resolve(new Connection(this._id, to))
-          } else {
-            reject()
+    connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
+      const secret = ENCRYPTION.generate_secret()
+      const public_key = ENCRYPTION.generate_public(secret)
+      const enc_flag = encrypted ? 1 : 0
+      emit('handshake', `${to}:SYN`, [this._id, enc_flag, public_key, CONFIG.ENCRYPTION.PRIME, CONFIG.ENCRYPTION.MOD])
+      return new Promise((resolve, reject) => {
+        function clear() {
+          system.afterEvents.scriptEventReceive.unsubscribe(listener)
+          system.clearRun(timeout_handle)
+        }
+        const timeout_handle = system.runTimeout(() => {
+          reject()
+          clear()
+        }, timeout)
+        const listener = listen('handshake', `${this._id}:ACK`, args => {
+          if (args[0] === to) {
+            const enc = args[1] === 1 || encrypted ? ENCRYPTION.generate_shared(secret, args[2]) : false
+            resolve(new Connection(this._id, to, enc))
+            clear()
           }
         })
       })
@@ -89,37 +195,28 @@ namespace IPC {
 
     handle(channel: string, listener: (...args: any[]) => any) {
       listen('invoke', `${this._id}:${channel}`, args => {
-        const result = listener(...args[1])
-        emit('handle', `${args[0]}:${channel}`, [this._id, result])
+        const enc = this._enc_map.get(args[0]) as string | false
+        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
+        const result = listener(...data)
+        const return_data = enc !== false ? ENCRYPTION.encrypt(JSON.stringify(result), enc) : result
+        emit('handle', `${args[0]}:${channel}`, [this._id, return_data])
       })
     }
 
     on(channel: string, listener: (...args: any[]) => void) {
-      listen('send', `${this._id}:${channel}`, args => listener(...args[1]))
+      listen('send', `${this._id}:${channel}`, args => {
+        const enc = this._enc_map.get(args[0]) as string | false
+        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
+        listener(...data)
+      })
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
       const event = listen('send', `${this._id}:${channel}`, args => {
-        listener(...args[1])
+        const enc = this._enc_map.get(args[0]) as string | false
+        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
+        listener(...data)
         system.afterEvents.scriptEventReceive.unsubscribe(event)
-      })
-    }
-
-    private handshake(receiver: string, timeout: number = 20): Promise<boolean> {
-      emit('handshake', `${receiver}:SYN`, [this._id])
-      return new Promise(resolve => {
-        const run_timeout = system.runTimeout(() => {
-          resolve(false)
-          system.afterEvents.scriptEventReceive.unsubscribe(listener)
-          system.clearRun(run_timeout)
-        }, timeout)
-        const listener = listen('handshake', `${this._id}:ACK`, args => {
-          if (args[0] === receiver) {
-            resolve(true)
-            system.afterEvents.scriptEventReceive.unsubscribe(listener)
-            system.clearRun(run_timeout)
-          }
-        })
       })
     }
   }
@@ -191,7 +288,8 @@ namespace IPC {
   }
 
   function emit(event_id: string, channel: string, args: any[]) {
-    const data_fragments: string[] = JSON.stringify(args).match(new RegExp(`.{1,${MAX_STR_LENGTH}}`, 'g')) ?? []
+    const data_fragments: string[] =
+      JSON.stringify(args).match(new RegExp(`.{1,${CONFIG.FRAGMENTATION.MAX_STR_LENGTH}}`, 'g')) ?? []
     const payload_strings = data_fragments
       .map((data, index) => {
         return data_fragments.length > 1
