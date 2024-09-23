@@ -62,7 +62,7 @@ namespace IPC {
       mod: number = CONFIG.ENCRYPTION.MOD,
       prime: number = CONFIG.ENCRYPTION.PRIME
     ): string {
-      return mod_exp(mod, secret, prime).toString(36).toUpperCase()
+      return HEX(mod_exp(mod, secret, prime))
     }
 
     export function generate_shared(
@@ -70,7 +70,7 @@ namespace IPC {
       other_key: string,
       prime: number = CONFIG.ENCRYPTION.PRIME
     ): string {
-      return mod_exp(parseInt(other_key, 36), secret, prime).toString(36).toUpperCase()
+      return HEX(mod_exp(NUM(other_key), secret, prime))
     }
 
     export function encrypt(raw: string, key: string): string {
@@ -101,12 +101,19 @@ namespace IPC {
       }
       return result
     }
+
+    function HEX(num: number): string {
+      return num.toString(16).toUpperCase()
+    }
+    function NUM(hex: string): number {
+      return parseInt(hex, 16)
+    }
   }
 
   export class Connection {
     private readonly _from: string
     private readonly _to: string
-    private readonly _encryption: string | false
+    private readonly _enc: string | false
 
     get from() {
       return this._from
@@ -119,26 +126,21 @@ namespace IPC {
     constructor(from: string, to: string, encryption: string | false) {
       this._from = from
       this._to = to
-      this._encryption = encryption
+      this._enc = encryption
     }
 
     send(channel: string, ...args: any[]): void {
-      emit('send', `${this._to}:${channel}`, [
-        this._from,
-        this._encryption !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._encryption) : args
-      ])
+      const data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._enc) : args
+      emit('send', `${this._to}:${channel}`, [this._from, data])
     }
 
     invoke(channel: string, ...args: any[]): Promise<any> {
-      emit('invoke', `${this._to}:${channel}`, [
-        this._from,
-        this._encryption !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._encryption) : args
-      ])
+      const data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._enc) : args
+      emit('invoke', `${this._to}:${channel}`, [this._from, data])
       return new Promise(resolve => {
         const listener = listen('handle', `${this._from}:${channel}`, args => {
-          resolve(
-            this._encryption !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._encryption)) : args[1]
-          )
+          const data = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._enc)) : args[1]
+          resolve(data)
           system.afterEvents.scriptEventReceive.unsubscribe(listener)
         })
       })
@@ -147,8 +149,8 @@ namespace IPC {
 
   export class ConnectionManager {
     private readonly _id: string
-    private readonly _encryption_map: Map<string, string | false>
-    private readonly _force_encryption: boolean
+    private readonly _enc_map: Map<string, string | false>
+    private readonly _enc_force: boolean
 
     get id() {
       return this._id
@@ -156,46 +158,36 @@ namespace IPC {
 
     constructor(id: string, force_encryption: boolean = false) {
       this._id = id
-      this._encryption_map = new Map<string, string | false>()
-      this._force_encryption = force_encryption
+      this._enc_map = new Map<string, string | false>()
+      this._enc_force = force_encryption
       listen('handshake', `${this._id}:SYN`, args => {
         const secret = ENCRYPTION.generate_secret(args[4])
         const public_key = ENCRYPTION.generate_public(secret, args[4], args[3])
-        this._encryption_map.set(
-          args[0],
-          args[1] === 1 || this._force_encryption ? ENCRYPTION.generate_shared(secret, args[2], args[3]) : false
-        )
-        emit('handshake', `${args[0]}:ACK`, [this._id, this._force_encryption ? 1 : 0, public_key])
+        const enc = args[1] === 1 || this._enc_force ? ENCRYPTION.generate_shared(secret, args[2], args[3]) : false
+        this._enc_map.set(args[0], enc)
+        emit('handshake', `${args[0]}:ACK`, [this._id, this._enc_force ? 1 : 0, public_key])
       })
     }
 
     connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
       const secret = ENCRYPTION.generate_secret()
       const public_key = ENCRYPTION.generate_public(secret)
-      emit('handshake', `${to}:SYN`, [
-        this._id,
-        encrypted ? 1 : 0,
-        public_key,
-        CONFIG.ENCRYPTION.PRIME,
-        CONFIG.ENCRYPTION.MOD
-      ])
+      const enc_flag = encrypted ? 1 : 0
+      emit('handshake', `${to}:SYN`, [this._id, enc_flag, public_key, CONFIG.ENCRYPTION.PRIME, CONFIG.ENCRYPTION.MOD])
       return new Promise((resolve, reject) => {
-        const run_timeout = system.runTimeout(() => {
-          reject()
+        function clear() {
           system.afterEvents.scriptEventReceive.unsubscribe(listener)
-          system.clearRun(run_timeout)
+          system.clearRun(timeout_handle)
+        }
+        const timeout_handle = system.runTimeout(() => {
+          reject()
+          clear()
         }, timeout)
         const listener = listen('handshake', `${this._id}:ACK`, args => {
           if (args[0] === to) {
-            resolve(
-              new Connection(
-                this._id,
-                to,
-                args[1] === 1 || encrypted ? ENCRYPTION.generate_shared(secret, args[2]) : false
-              )
-            )
-            system.afterEvents.scriptEventReceive.unsubscribe(listener)
-            system.clearRun(run_timeout)
+            const enc = args[1] === 1 || encrypted ? ENCRYPTION.generate_shared(secret, args[2]) : false
+            resolve(new Connection(this._id, to, enc))
+            clear()
           }
         })
       })
@@ -203,28 +195,27 @@ namespace IPC {
 
     handle(channel: string, listener: (...args: any[]) => any) {
       listen('invoke', `${this._id}:${channel}`, args => {
-        const encryption = this._encryption_map.get(args[0]) as string | false
-        const result = listener(
-          ...(encryption !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, encryption)) : args[1])
-        )
-        emit('handle', `${args[0]}:${channel}`, [
-          this._id,
-          encryption !== false ? ENCRYPTION.encrypt(JSON.stringify(result), encryption) : result
-        ])
+        const enc = this._enc_map.get(args[0]) as string | false
+        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
+        const result = listener(...data)
+        const return_data = enc !== false ? ENCRYPTION.encrypt(JSON.stringify(result), enc) : result
+        emit('handle', `${args[0]}:${channel}`, [this._id, return_data])
       })
     }
 
     on(channel: string, listener: (...args: any[]) => void) {
       listen('send', `${this._id}:${channel}`, args => {
-        const encryption = this._encryption_map.get(args[0]) as string | false
-        listener(...(encryption !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, encryption)) : args[1]))
+        const enc = this._enc_map.get(args[0]) as string | false
+        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
+        listener(...data)
       })
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
       const event = listen('send', `${this._id}:${channel}`, args => {
-        const encryption = this._encryption_map.get(args[0]) as string | false
-        listener(...(encryption !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, encryption)) : args[1]))
+        const enc = this._enc_map.get(args[0]) as string | false
+        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
+        listener(...data)
         system.afterEvents.scriptEventReceive.unsubscribe(event)
       })
     }
