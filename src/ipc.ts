@@ -316,20 +316,49 @@ namespace IPC {
       } else {
         const mid = CMD({ channel: channel, id: ID, data: sub_str, index: commands.length })
         if (mid.length > CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
-          const encoded_chars = Array.from(sub_str).map(c => encodeURI(c))
+          const true_chars = Array.from(sub_str)
+
+          const chars = (function (chars: string[]) {
+            const result: string[] = []
+            let accumulator: string = ''
+            chars.forEach(c => {
+              if (c === '\\') {
+                accumulator += c
+                if (accumulator.length === 2) {
+                  result.push(accumulator)
+                  accumulator = ''
+                }
+              } else {
+                if (accumulator.length === 1) {
+                  result.push(accumulator + c)
+                  accumulator = ''
+                } else {
+                  result.push(c)
+                }
+              }
+            })
+            return result
+          })(Array.from(JSON.stringify(sub_str)))
+
+          const encoded_chars = chars.map(c => encodeURI(c))
+
+          let adjusted_chars = true_chars
+
           const encoded_chars_length = encoded_chars.reduce((acc, c) => acc + c.length, 0)
           const length_overflow = mid.length - CONFIG.FRAGMENTATION.MAX_CMD_LENGTH
           const encoded_data_target_length = encoded_chars_length - length_overflow
           if (encoded_data_target_length < 1) throw new Error('Invalid Target Length')
           let encoded_chars_total = encoded_chars_length
           while (encoded_chars_total > encoded_data_target_length) {
-            encoded_chars_total -= encoded_chars.pop()?.length ?? 0
+            adjusted_chars.pop()
+            encoded_chars_total -= encoded_chars[adjusted_chars.length + 1]?.length
           }
-          const adjusted_chars = encoded_chars.map(c => decodeURI(c)).join('')
-          if (adjusted_chars.length < 1) throw new Error('Empty Data')
-          const new_cmd = CMD({ channel: channel, id: ID, data: adjusted_chars, index: commands.length })
-          sub_str = args_str.substring(idx, idx + adjusted_chars.length)
-          idx += adjusted_chars.length
+          const adjusted_string = adjusted_chars.join('')
+
+          if (adjusted_string.length < 1) throw new Error('Empty Data')
+          const new_cmd = CMD({ channel: channel, id: ID, data: adjusted_string, index: commands.length })
+          sub_str = args_str.substring(idx, idx + adjusted_string.length)
+          idx += adjusted_string.length
           commands.push(new_cmd)
         } else {
           commands.push(mid)
