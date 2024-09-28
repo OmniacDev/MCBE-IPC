@@ -299,70 +299,69 @@ namespace IPC {
     while (idx != -1) {
       let sub_str = args_str.substring(idx)
 
+      // create one cmd, then add extra length for mid & final
+      const cmd = CMD({ channel: channel, id: ID, data: sub_str })
+
+      // first command, so try to create a single
       if (commands.length === 0) {
-        const single = CMD({ channel: channel, id: ID, data: sub_str })
-        if (single.length < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
-          commands.push(single)
+        if (cmd.length < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+          commands.push(cmd)
+          idx = -1
+          break
+        }
+      }
+      // not first, so try to create final
+      else {
+        const final_length = cmd.length + `,${commands.length},1`.length
+        if (final_length < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+          commands.push(CMD({ channel: channel, id: ID, data: sub_str, index: commands.length, final: true }))
           idx = -1
           break
         }
       }
 
-      const final = CMD({ channel: channel, id: ID, data: sub_str, index: commands.length, final: true })
-      if (final.length < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
-        commands.push(final)
-        idx = -1
-        break
-      } else {
-        const mid = CMD({ channel: channel, id: ID, data: sub_str, index: commands.length })
-        if (mid.length > CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
-          const true_chars = Array.from(sub_str)
+      // if neither worked, create a mid
+      const mid_length = cmd.length + `,${commands.length}`.length
+      if (mid_length > CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+        const chars = Array.from(sub_str)
 
-          const chars = (function (chars: string[]) {
-            const result: string[] = []
-            let accumulator: string = ''
-            chars.forEach(c => {
-              if (c === '\\') {
-                accumulator += c
-                if (accumulator.length === 2) {
-                  result.push(accumulator)
-                  accumulator = ''
-                }
-              } else {
-                if (accumulator.length === 1) {
-                  result.push(accumulator + c)
-                  accumulator = ''
-                } else {
-                  result.push(c)
-                }
+        const encoded_chars = (function (chars: string[]) {
+          const result: string[] = []
+          let accumulator: string = ''
+          chars.forEach(c => {
+            if (c === '\\') {
+              accumulator += c
+              if (accumulator.length === 2) {
+                result.push(encodeURI(accumulator))
+                accumulator = ''
               }
-            })
-            return result
-          })(Array.from(JSON.stringify(sub_str)))
+            } else if (accumulator.length === 1) {
+              result.push(encodeURI(accumulator + c))
+              accumulator = ''
+            } else {
+              result.push(encodeURI(c))
+            }
+          })
+          return result
+        })(Array.from(JSON.stringify(sub_str)))
 
-          const encoded_chars = chars.map(c => encodeURI(c))
+        let enc_chars_len = encoded_chars.reduce((acc, c) => acc + c.length, 0)
+        
+        const enc_target_len = enc_chars_len - mid_length - CONFIG.FRAGMENTATION.MAX_CMD_LENGTH
+        if (enc_target_len < 1) throw new Error('Invalid Target Length')
 
-          let adjusted_chars = true_chars
-
-          const encoded_chars_length = encoded_chars.reduce((acc, c) => acc + c.length, 0)
-          const length_overflow = mid.length - CONFIG.FRAGMENTATION.MAX_CMD_LENGTH
-          const encoded_data_target_length = encoded_chars_length - length_overflow
-          if (encoded_data_target_length < 1) throw new Error('Invalid Target Length')
-          let encoded_chars_total = encoded_chars_length
-          while (encoded_chars_total > encoded_data_target_length) {
-            adjusted_chars.pop()
-            encoded_chars_total -= encoded_chars[adjusted_chars.length + 1]?.length
-          }
-          const adjusted_string = adjusted_chars.join('')
-
-          if (adjusted_string.length < 1) throw new Error('Empty Data')
-          const new_cmd = CMD({ channel: channel, id: ID, data: adjusted_string, index: commands.length })
-          sub_str = args_str.substring(idx, idx + adjusted_string.length)
-          idx += adjusted_string.length
-          commands.push(new_cmd)
-        } else {
-          commands.push(mid)
+        while (enc_chars_len > enc_target_len) {
+          chars.pop()
+          enc_chars_len -= encoded_chars[chars.length + 1]?.length
         }
+
+        const adjusted_string = chars.join('')
+        if (adjusted_string.length < 1) throw new Error('Empty Data')
+
+        idx += adjusted_string.length
+        commands.push(CMD({ channel: channel, id: ID, data: adjusted_string, index: commands.length }))
+      } else {
+        commands.push(CMD({ channel: channel, id: ID, data: sub_str, index: commands.length }))
       }
     }
 
