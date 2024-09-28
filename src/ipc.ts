@@ -347,7 +347,7 @@ namespace IPC {
 
         let enc_chars_len = encoded_chars.reduce((acc, c) => acc + c.length, 0)
         
-        const enc_target_len = enc_chars_len - mid_length - CONFIG.FRAGMENTATION.MAX_CMD_LENGTH
+        const enc_target_len = enc_chars_len - (mid_length - CONFIG.FRAGMENTATION.MAX_CMD_LENGTH)
         if (enc_target_len < 1) throw new Error('Invalid Target Length')
 
         while (enc_chars_len > enc_target_len) {
