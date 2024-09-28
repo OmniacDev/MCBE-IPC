@@ -48,7 +48,7 @@ namespace IPC {
        * @default 1024
        * @warning Modify only if you know what you're doing, incorrect values can cause issues
        */
-      export let MAX_STR_LENGTH: number = 1024
+      export let MAX_CMD_LENGTH: number = 1024
     }
   }
 
@@ -288,21 +288,59 @@ namespace IPC {
   }
 
   function emit(event_id: string, channel: string, args: any[]) {
-    const data_fragments: string[] =
-      JSON.stringify(args).match(new RegExp(`.{1,${CONFIG.FRAGMENTATION.MAX_STR_LENGTH}}`, 'g')) ?? []
-    const payload_strings = data_fragments
-      .map((data, index) => {
-        return data_fragments.length > 1
-          ? index === data_fragments.length - 1
-            ? { channel: channel, id: ID, data: data, index: index, final: true }
-            : { channel: channel, id: ID, data: data, index: index }
-          : { channel: channel, id: ID, data: data }
-      })
-      .map(payload => Payload.toString(payload))
+    function CMD(payload: Payload) {
+      return `scriptevent ipc:${event_id} ${encodeURI(Payload.toString(payload))}`
+    }
+
+    const args_str = JSON.stringify(args)
+    const commands: string[] = []
+
+    let idx = 0
+    while (idx != -1) {
+      let sub_str = args_str.substring(idx)
+
+      if (commands.length === 0) {
+        const single = CMD({ channel: channel, id: ID, data: sub_str })
+        if (single.length < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+          commands.push(single)
+          idx = -1
+          break
+        }
+      }
+
+      const final = CMD({ channel: channel, id: ID, data: sub_str, index: commands.length, final: true })
+      if (final.length < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+        commands.push(final)
+        idx = -1
+        break
+      } else {
+        const mid = CMD({ channel: channel, id: ID, data: sub_str, index: commands.length })
+        if (mid.length > CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+          const encoded_chars = Array.from(sub_str).map(c => encodeURI(c))
+          const encoded_chars_length = encoded_chars.reduce((acc, c) => acc + c.length, 0)
+          const length_overflow = mid.length - CONFIG.FRAGMENTATION.MAX_CMD_LENGTH
+          const encoded_data_target_length = encoded_chars_length - length_overflow
+          if (encoded_data_target_length < 1) throw new Error('Invalid Target Length')
+          let encoded_chars_total = encoded_chars_length
+          while (encoded_chars_total > encoded_data_target_length) {
+            encoded_chars_total -= encoded_chars.pop()?.length ?? 0
+          }
+          const adjusted_chars = encoded_chars.map(c => decodeURI(c)).join('')
+          if (adjusted_chars.length < 1) throw new Error('Empty Data')
+          const new_cmd = CMD({ channel: channel, id: ID, data: adjusted_chars, index: commands.length })
+          sub_str = args_str.substring(idx, idx + adjusted_chars.length)
+          idx += adjusted_chars.length
+          commands.push(new_cmd)
+        } else {
+          commands.push(mid)
+        }
+      }
+    }
+
     system.runJob(
       (function* () {
-        for (const string of payload_strings) {
-          world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${encodeURI(string)}`)
+        for (const cmd of commands) {
+          world.getDimension('overworld').runCommand(cmd)
           yield
         }
       })()
