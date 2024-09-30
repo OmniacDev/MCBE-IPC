@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { world, system } from '@minecraft/server'
+import { world, system, ScriptEventSource } from '@minecraft/server'
 
 namespace IPC {
   let ID = 0
@@ -262,7 +262,7 @@ namespace IPC {
     const buffer = new Map<number, { size: number; payloads: Payload[] }>()
     return system.afterEvents.scriptEventReceive.subscribe(
       event => {
-        if (event.id === `ipc:${event_id}`) {
+        if (event.id === `ipc:${event_id}` && event.sourceType === ScriptEventSource.Server) {
           const p: Payload.Packed = JSON.parse(decodeURI(event.message))
           if (p[0] === channel) {
             const payload: Payload = Payload.fromPacked(p)
