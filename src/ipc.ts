@@ -293,51 +293,45 @@ namespace IPC {
     const args_str = JSON.stringify(args)
     const chars = Array.from(args_str)
     const enc_chars = (function (chars: string[]) {
-      const r: string[] = []
+      let r: string[] = []
       let acc: string = ''
       chars.forEach(c => {
-        if (c === '\\') {
+        if (c === '\\' && acc.length === 0) {
           acc += c
-          if (acc.length === 2) {
-            r.push(encodeURI(acc))
-            acc = ''
-          }
-        } else if (acc.length === 1) {
+        } else {
           r.push(encodeURI(acc + c))
           acc = ''
-        } else {
-          r.push(encodeURI(c))
         }
       })
       return r
     })(Array.from(JSON.stringify(args_str)))
 
-    const commands: string[] = []
+    const payloads: Payload[] = []
     let str = ''
     let enc_str_len = 0
     for (let i = 0; i < chars.length; i++) {
       const enc_char = enc_chars[i + 1]
-      const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${commands.length},1`.length
+      const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${payloads.length},1`.length
       if (cmd_len < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
         str += chars[i]
         enc_str_len += enc_char.length
       } else {
-        commands.push(CMD({ channel: channel, id: ID, data: str, index: commands.length }))
+        payloads.push({ channel: channel, id: ID, data: str, index: payloads.length })
         str = chars[i]
         enc_str_len = enc_char.length
       }
     }
 
-    if (commands.length === 0) {
-      commands.push(CMD({ channel: channel, id: ID, data: str }))
+    if (payloads.length === 0) {
+      payloads.push({ channel: channel, id: ID, data: str })
     } else {
-      commands.push(CMD({ channel: channel, id: ID, data: str, index: commands.length, final: true }))
+      payloads.push({ channel: channel, id: ID, data: str, index: payloads.length, final: true })
     }
 
     system.runJob(
       (function* () {
-        for (const cmd of commands) {
-          world.getDimension('overworld').runCommand(cmd)
+        for (const payload of payloads) {
+          world.getDimension('overworld').runCommand(CMD(payload))
           yield
         }
       })()
