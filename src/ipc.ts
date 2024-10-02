@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { world, system } from '@minecraft/server'
+import { world, system, ScriptEventSource } from '@minecraft/server'
 
 namespace IPC {
   let ID = 0
@@ -45,10 +45,10 @@ namespace IPC {
     export namespace FRAGMENTATION {
       /**
        * @description Used when fragmenting data strings
-       * @default 1024
+       * @default 2048
        * @warning Modify only if you know what you're doing, incorrect values can cause issues
        */
-      export let MAX_STR_LENGTH: number = 1024
+      export let MAX_CMD_LENGTH: number = 2048
     }
   }
 
@@ -262,7 +262,7 @@ namespace IPC {
     const buffer = new Map<number, { size: number; payloads: Payload[] }>()
     return system.afterEvents.scriptEventReceive.subscribe(
       event => {
-        if (event.id === `ipc:${event_id}`) {
+        if (event.id === `ipc:${event_id}` && event.sourceType === ScriptEventSource.Server) {
           const p: Payload.Packed = JSON.parse(decodeURI(event.message))
           if (p[0] === channel) {
             const payload: Payload = Payload.fromPacked(p)
@@ -288,21 +288,50 @@ namespace IPC {
   }
 
   function emit(event_id: string, channel: string, args: any[]) {
-    const data_fragments: string[] =
-      JSON.stringify(args).match(new RegExp(`.{1,${CONFIG.FRAGMENTATION.MAX_STR_LENGTH}}`, 'g')) ?? []
-    const payload_strings = data_fragments
-      .map((data, index) => {
-        return data_fragments.length > 1
-          ? index === data_fragments.length - 1
-            ? { channel: channel, id: ID, data: data, index: index, final: true }
-            : { channel: channel, id: ID, data: data, index: index }
-          : { channel: channel, id: ID, data: data }
+    const CMD = (payload: Payload) => `scriptevent ipc:${event_id} ${encodeURI(Payload.toString(payload))}`
+    const cmd = CMD({ channel: channel, id: ID, data: '' })
+    const args_str = JSON.stringify(args)
+    const chars = Array.from(args_str)
+    const enc_chars = (function (chars: string[]) {
+      let r: string[] = []
+      let acc: string = ''
+      chars.forEach(c => {
+        if (c === '\\' && acc.length === 0) {
+          acc += c
+        } else {
+          r.push(encodeURI(acc + c))
+          acc = ''
+        }
       })
-      .map(payload => Payload.toString(payload))
+      return r
+    })(Array.from(JSON.stringify(args_str)))
+
+    const payloads: Payload[] = []
+    let str = ''
+    let enc_str_len = 0
+    for (let i = 0; i < chars.length; i++) {
+      const enc_char = enc_chars[i + 1]
+      const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${payloads.length},1`.length
+      if (cmd_len < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+        str += chars[i]
+        enc_str_len += enc_char.length
+      } else {
+        payloads.push({ channel: channel, id: ID, data: str, index: payloads.length })
+        str = chars[i]
+        enc_str_len = enc_char.length
+      }
+    }
+
+    if (payloads.length === 0) {
+      payloads.push({ channel: channel, id: ID, data: str })
+    } else {
+      payloads.push({ channel: channel, id: ID, data: str, index: payloads.length, final: true })
+    }
+
     system.runJob(
       (function* () {
-        for (const string of payload_strings) {
-          world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${encodeURI(string)}`)
+        for (const payload of payloads) {
+          world.getDimension('overworld').runCommand(CMD(payload))
           yield
         }
       })()
