@@ -45,10 +45,10 @@ namespace IPC {
     export namespace FRAGMENTATION {
       /**
        * @description Used when fragmenting data strings
-       * @default 1024
+       * @default 2048
        * @warning Modify only if you know what you're doing, incorrect values can cause issues
        */
-      export let MAX_CMD_LENGTH: number = 1024
+      export let MAX_CMD_LENGTH: number = 2048
     }
   }
 
