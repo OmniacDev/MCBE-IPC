@@ -139,35 +139,41 @@ namespace IPC {
       emit('invoke', `${this._to}:${channel}`, [this._from, data])
       return new Promise(resolve => {
         const listener = listen('handle', `${this._from}:${channel}`, args => {
-          const data = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._enc)) : args[1]
-          resolve(data)
-          system.afterEvents.scriptEventReceive.unsubscribe(listener)
+          if (args[0] === this._to) {
+            const data = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._enc)) : args[1]
+            resolve(data)
+            system.afterEvents.scriptEventReceive.unsubscribe(listener)
+          }
         })
       })
     }
     
     // TODO: Fix Invoke impl on ConnectionManager
-    // handle(channel: string, listener: (...args: any[]) => any) {
-    //   listen('invoke', `${this._to}:${channel}`, args => {
-    //     const data: any[] = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[0] as string, this._enc)) : args[0]
-    //     const result = listener(...data)
-    //     const return_data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(result), this._enc) : result
-    //     emit('handle', `${this._to}:${channel}`, [return_data])
-    //   })
-    // }
+    handle(channel: string, listener: (...args: any[]) => any) {
+      listen('invoke', `${this._from}:${channel}`, args => {
+        const data: any[] = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[0] as string, this._enc)) : args[0]
+        const result = listener(...data)
+        const return_data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(result), this._enc) : result
+        emit('handle', `${this._to}:${channel}`, [return_data])
+      })
+    }
     
     on(channel: string, listener: (...args: any[]) => void) {
       listen('send', `${this._from}:${channel}`, args => {
-        const data: any[] = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._enc)) : args[1]
-        listener(...data)
+        if (args[0] === this._to) {
+          const data: any[] = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._enc)) : args[1]
+          listener(...data)
+        }
       })
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
       const event = listen('send', `${this._from}:${channel}`, args => {
-        const data: any[] = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._enc)) : args[1]
-        listener(...data)
-        system.afterEvents.scriptEventReceive.unsubscribe(event)
+        if (args[0] === this._to) {
+          const data: any[] = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._enc)) : args[1]
+          listener(...data)
+          system.afterEvents.scriptEventReceive.unsubscribe(event)
+        }
       })
     }
   }
@@ -253,19 +259,23 @@ namespace IPC {
     }
     
     // TODO: Multiple promises?
-    // invoke(channel: string, ...args: any[]): Promise<any> {
-    //   this._enc_map.forEach((value, key) => {
-    //     const data = value !== false ? ENCRYPTION.encrypt(JSON.stringify(args), value) : args
-    //     emit('invoke', `${key}:${channel}`, [this._id, data])
-    //     return new Promise(resolve => {
-    //       const listener = listen('handle', `${this._id}:${channel}`, args => {
-    //         const data = value !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, value)) : args[1]
-    //         resolve(data)
-    //         system.afterEvents.scriptEventReceive.unsubscribe(listener)
-    //       })
-    //     })
-    //   })
-    // }
+    invoke(channel: string, ...args: any[]): Promise<any>[] {
+      const promises: Promise<any>[] = []
+      this._enc_map.forEach((value, key) => {
+        const data = value !== false ? ENCRYPTION.encrypt(JSON.stringify(args), value) : args
+        emit('invoke', `${key}:${channel}`, [this._id, data])
+        promises.push(new Promise(resolve => {
+          const listener = listen('handle', `${this._id}:${channel}`, args => {
+            if (args[0] === key) {
+              const data = value !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, value)) : args[1]
+              resolve(data)
+              system.afterEvents.scriptEventReceive.unsubscribe(listener)
+            }
+          })
+        }))
+      })
+      return promises
+    }
   }
 
   interface Payload {
