@@ -148,13 +148,14 @@ namespace IPC {
       })
     }
     
-    // TODO: Fix Invoke impl on ConnectionManager
     handle(channel: string, listener: (...args: any[]) => any) {
       listen('invoke', `${this._from}:${channel}`, args => {
-        const data: any[] = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[0] as string, this._enc)) : args[0]
-        const result = listener(...data)
-        const return_data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(result), this._enc) : result
-        emit('handle', `${this._to}:${channel}`, [return_data])
+        if (args[0] === this._to) {
+          const data: any[] = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[0] as string, this._enc)) : args[0]
+          const result = listener(...data)
+          const return_data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(result), this._enc) : result
+          emit('handle', `${this._to}:${channel}`, [this._from, return_data])
+        }
       })
     }
     
@@ -227,27 +228,33 @@ namespace IPC {
     handle(channel: string, listener: (...args: any[]) => any) {
       listen('invoke', `${this._id}:${channel}`, args => {
         const enc = this._enc_map.get(args[0]) as string | false
-        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
-        const result = listener(...data)
-        const return_data = enc !== false ? ENCRYPTION.encrypt(JSON.stringify(result), enc) : result
-        emit('handle', `${args[0]}:${channel}`, [this._id, return_data])
+        if (enc !== undefined) {
+          const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
+          const result = listener(...data)
+          const return_data = enc !== false ? ENCRYPTION.encrypt(JSON.stringify(result), enc) : result
+          emit('handle', `${args[0]}:${channel}`, [this._id, return_data])
+        }
       })
     }
 
     on(channel: string, listener: (...args: any[]) => void) {
       listen('send', `${this._id}:${channel}`, args => {
         const enc = this._enc_map.get(args[0]) as string | false
-        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
-        listener(...data)
+        if (enc !== undefined) {
+          const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
+          listener(...data)
+        }
       })
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
       const event = listen('send', `${this._id}:${channel}`, args => {
         const enc = this._enc_map.get(args[0]) as string | false
-        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
-        listener(...data)
-        system.afterEvents.scriptEventReceive.unsubscribe(event)
+        if (enc !== undefined) {
+          const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
+          listener(...data)
+          system.afterEvents.scriptEventReceive.unsubscribe(event)
+        }
       })
     }
 
@@ -258,7 +265,6 @@ namespace IPC {
       })
     }
     
-    // TODO: Multiple promises?
     invoke(channel: string, ...args: any[]): Promise<any>[] {
       const promises: Promise<any>[] = []
       this._enc_map.forEach((value, key) => {
