@@ -200,7 +200,7 @@ namespace IPC {
   export class ConnectionManager {
     private readonly _id: string
     private readonly _enc_map: Map<string, string | false>
-    /** Enforces outgoing Connection singularity */ 
+    /** Enforces outgoing Connection singularity */
     private readonly _con_map: Map<string, Connection>
     private readonly _enc_force: boolean
 
@@ -247,12 +247,17 @@ namespace IPC {
         const con = this._con_map.get(to)
         if (con !== undefined) {
           resolve(con)
-        }
-        else {
+        } else {
           const secret = ENCRYPTION.generate_secret()
           const public_key = ENCRYPTION.generate_public(secret)
           const enc_flag = encrypted ? 1 : 0
-          emit('handshake', `${to}:SYN`, [this._id, enc_flag, public_key, CONFIG.ENCRYPTION.PRIME, CONFIG.ENCRYPTION.MOD])
+          emit('handshake', `${to}:SYN`, [
+            this._id,
+            enc_flag,
+            public_key,
+            CONFIG.ENCRYPTION.PRIME,
+            CONFIG.ENCRYPTION.MOD
+          ])
           function clear() {
             system.afterEvents.scriptEventReceive.unsubscribe(listener)
             system.clearRun(timeout_handle)
