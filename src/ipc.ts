@@ -200,6 +200,8 @@ namespace IPC {
   export class ConnectionManager {
     private readonly _id: string
     private readonly _enc_map: Map<string, string | false>
+    /** Enforces outgoing Connection singularity */ 
+    private readonly _con_map: Map<string, Connection>
     private readonly _enc_force: boolean
 
     private ARGS(data: any) {
@@ -229,6 +231,7 @@ namespace IPC {
     constructor(id: string, force_encryption: boolean = false) {
       this._id = id
       this._enc_map = new Map<string, string | false>()
+      this._con_map = new Map<string, Connection>()
       this._enc_force = force_encryption
       listen('handshake', `${this._id}:SYN`, args => {
         const secret = ENCRYPTION.generate_secret(args[4])
@@ -240,26 +243,34 @@ namespace IPC {
     }
 
     connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
-      const secret = ENCRYPTION.generate_secret()
-      const public_key = ENCRYPTION.generate_public(secret)
-      const enc_flag = encrypted ? 1 : 0
-      emit('handshake', `${to}:SYN`, [this._id, enc_flag, public_key, CONFIG.ENCRYPTION.PRIME, CONFIG.ENCRYPTION.MOD])
       return new Promise((resolve, reject) => {
-        function clear() {
-          system.afterEvents.scriptEventReceive.unsubscribe(listener)
-          system.clearRun(timeout_handle)
+        const con = this._con_map.get(to)
+        if (con !== undefined) {
+          resolve(con)
         }
-        const timeout_handle = system.runTimeout(() => {
-          reject()
-          clear()
-        }, timeout)
-        const listener = listen('handshake', `${this._id}:ACK`, args => {
-          if (args[0] === to) {
-            const enc = args[1] === 1 || encrypted ? ENCRYPTION.generate_shared(secret, args[2]) : false
-            resolve(new Connection(this._id, to, enc))
-            clear()
+        else {
+          const secret = ENCRYPTION.generate_secret()
+          const public_key = ENCRYPTION.generate_public(secret)
+          const enc_flag = encrypted ? 1 : 0
+          emit('handshake', `${to}:SYN`, [this._id, enc_flag, public_key, CONFIG.ENCRYPTION.PRIME, CONFIG.ENCRYPTION.MOD])
+          function clear() {
+            system.afterEvents.scriptEventReceive.unsubscribe(listener)
+            system.clearRun(timeout_handle)
           }
-        })
+          const timeout_handle = system.runTimeout(() => {
+            reject()
+            clear()
+          }, timeout)
+          const listener = listen('handshake', `${this._id}:ACK`, args => {
+            if (args[0] === to) {
+              const enc = args[1] === 1 || encrypted ? ENCRYPTION.generate_shared(secret, args[2]) : false
+              const new_con = new Connection(this._id, to, enc)
+              this._con_map.set(to, new_con)
+              resolve(new_con)
+              clear()
+            }
+          })
+        }
       })
     }
 
