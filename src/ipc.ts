@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { world, system, ScriptEventSource } from '@minecraft/server'
+import { world, system, ScriptEventSource, ScriptEventCommandMessageAfterEvent } from '@minecraft/server'
 
 namespace IPC {
   let ID = 0
@@ -114,6 +114,7 @@ namespace IPC {
     private readonly _from: string
     private readonly _to: string
     private readonly _enc: string | false
+    private readonly _listeners: Array<(arg: ScriptEventCommandMessageAfterEvent) => void>
 
     private ARGS(data: any) {
       return [this._from, data]
@@ -145,6 +146,13 @@ namespace IPC {
       this._from = from
       this._to = to
       this._enc = encryption
+      this._listeners = new Array<(arg: ScriptEventCommandMessageAfterEvent) => void>()
+    }
+
+    terminate() {
+      this._listeners.forEach(listener => {
+        system.afterEvents.scriptEventReceive.unsubscribe(listener)
+      })
     }
 
     send(channel: string, ...args: any[]): void {
@@ -167,23 +175,23 @@ namespace IPC {
     }
 
     handle(channel: string, listener: (...args: any[]) => any) {
-      listen('invoke', this.CHANNEL(channel), args => {
+      this._listeners.push(listen('invoke', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
           const data = this.MAYBE_DECRYPT(args)
           const result = listener(...data)
           const return_data = this.MAYBE_ENCRYPT(result)
           emit('handle', this.CHANNEL(channel, this._to), this.ARGS(return_data))
         })
-      })
+      }))
     }
 
     on(channel: string, listener: (...args: any[]) => void) {
-      listen('send', this.CHANNEL(channel), args => {
+      this._listeners.push(listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
           const data = this.MAYBE_DECRYPT(args)
           listener(...data)
         })
-      })
+      }))
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
@@ -194,6 +202,7 @@ namespace IPC {
           system.afterEvents.scriptEventReceive.unsubscribe(event)
         })
       })
+      this._listeners.push(event)
     }
   }
 
@@ -246,6 +255,7 @@ namespace IPC {
       return new Promise((resolve, reject) => {
         const con = this._con_map.get(to)
         if (con !== undefined) {
+          con.terminate()
           resolve(con)
         } else {
           const secret = ENCRYPTION.generate_secret()
