@@ -209,7 +209,6 @@ namespace IPC {
   export class ConnectionManager {
     private readonly _id: string
     private readonly _enc_map: Map<string, string | false>
-    /** Enforces outgoing Connection singularity */
     private readonly _con_map: Map<string, Connection>
     private readonly _enc_force: boolean
 
