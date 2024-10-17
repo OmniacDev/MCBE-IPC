@@ -151,6 +151,7 @@ namespace IPC {
 
     terminate(notify: boolean = true) {
       this._terminators.forEach(terminate => terminate())
+      this._terminators.length = 0
       if (notify) {
         emit('terminate', this._to, [this._from])
       }
@@ -426,6 +427,7 @@ namespace IPC {
 
   function emit(event_id: string, channel: string, args: any[]) {
     const CMD = (payload: Payload) => `scriptevent ipc:${event_id} ${encodeURI(Payload.toString(payload))}`
+    const RUN = (cmd: string) => world.getDimension('overworld').runCommand(cmd)
     const cmd = CMD({ channel: channel, id: ID, data: '' })
     const args_str = JSON.stringify(args)
     const chars = Array.from(args_str)
@@ -443,33 +445,30 @@ namespace IPC {
       return r
     })(Array.from(JSON.stringify(args_str)))
 
-    const payloads: Payload[] = []
-    let str = ''
-    let enc_str_len = 0
-    for (let i = 0; i < chars.length; i++) {
-      const enc_char = enc_chars[i + 1]
-      const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${payloads.length},1`.length
-      if (cmd_len < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
-        str += chars[i]
-        enc_str_len += enc_char.length
-      } else {
-        payloads.push({ channel: channel, id: ID, data: str, index: payloads.length })
-        str = chars[i]
-        enc_str_len = enc_char.length
-      }
-    }
-
-    if (payloads.length === 0) {
-      payloads.push({ channel: channel, id: ID, data: str })
-    } else {
-      payloads.push({ channel: channel, id: ID, data: str, index: payloads.length, final: true })
-    }
-
     system.runJob(
       (function* () {
-        for (const payload of payloads) {
-          world.getDimension('overworld').runCommand(CMD(payload))
+        let idx = 0
+        let str = ''
+        let enc_str_len = 0
+        for (let i = 0; i < chars.length; i++) {
+          const enc_char = enc_chars[i + 1]
+          const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${idx},1`.length
+          if (cmd_len < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+            str += chars[i]
+            enc_str_len += enc_char.length
+          } else {
+            RUN(CMD({ channel: channel, id: ID, data: str, index: idx }))
+            idx++
+            str = chars[i]
+            enc_str_len = enc_char.length
+          }
           yield
+        }
+
+        if (idx === 0) {
+          RUN(CMD({ channel: channel, id: ID, data: str }))
+        } else {
+          RUN(CMD({ channel: channel, id: ID, data: str, index: idx, final: true }))
         }
       })()
     )
