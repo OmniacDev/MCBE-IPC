@@ -465,11 +465,13 @@ namespace IPC {
           yield
         }
 
-        if (idx === 0) {
-          RUN(CMD({ channel: channel, id: ID, data: str }))
-        } else {
-          RUN(CMD({ channel: channel, id: ID, data: str, index: idx, final: true }))
-        }
+        RUN(
+          CMD(
+            idx === 0
+              ? { channel: channel, id: ID, data: str }
+              : { channel: channel, id: ID, data: str, index: idx, final: true }
+          )
+        )
       })()
     )
     ID++
