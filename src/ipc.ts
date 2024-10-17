@@ -114,7 +114,7 @@ namespace IPC {
     private readonly _from: string
     private readonly _to: string
     private readonly _enc: string | false
-    private readonly _listeners: Array<(arg: ScriptEventCommandMessageAfterEvent) => void>
+    private readonly _terminators: Array<() => void>
 
     private ARGS(data: any) {
       return [this._from, data]
@@ -146,13 +146,14 @@ namespace IPC {
       this._from = from
       this._to = to
       this._enc = encryption
-      this._listeners = new Array<(arg: ScriptEventCommandMessageAfterEvent) => void>()
+      this._terminators = new Array<() => void>()
     }
 
-    terminate() {
-      this._listeners.forEach(listener => {
-        system.afterEvents.scriptEventReceive.unsubscribe(listener)
-      })
+    terminate(notify: boolean = true) {
+      this._terminators.forEach(terminate => terminate())
+      if (notify) {
+        emit('terminate', this._to, [this._from])
+      }
     }
 
     send(channel: string, ...args: any[]): void {
@@ -164,45 +165,50 @@ namespace IPC {
       const data = this.MAYBE_ENCRYPT(args)
       emit('invoke', this.CHANNEL(channel, this._to), this.ARGS(data))
       return new Promise(resolve => {
-        const listener = listen('handle', this.CHANNEL(channel), args => {
+        const terminate = listen('handle', this.CHANNEL(channel), args => {
           this.GUARD(args, () => {
             const data = this.MAYBE_DECRYPT(args)
             resolve(data)
-            system.afterEvents.scriptEventReceive.unsubscribe(listener)
+            terminate()
           })
         })
       })
     }
 
     handle(channel: string, listener: (...args: any[]) => any) {
-      this._listeners.push(listen('invoke', this.CHANNEL(channel), args => {
+      const terminate = listen('invoke', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
           const data = this.MAYBE_DECRYPT(args)
           const result = listener(...data)
           const return_data = this.MAYBE_ENCRYPT(result)
           emit('handle', this.CHANNEL(channel, this._to), this.ARGS(return_data))
         })
-      }))
+      })
+      this._terminators.push(terminate)
+      return terminate
     }
 
     on(channel: string, listener: (...args: any[]) => void) {
-      this._listeners.push(listen('send', this.CHANNEL(channel), args => {
+      const terminate = listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
           const data = this.MAYBE_DECRYPT(args)
           listener(...data)
         })
-      }))
+      })
+      this._terminators.push(terminate)
+      return terminate
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
-      const event = listen('send', this.CHANNEL(channel), args => {
+      const terminate = listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
           const data = this.MAYBE_DECRYPT(args)
           listener(...data)
-          system.afterEvents.scriptEventReceive.unsubscribe(event)
+          terminate()
         })
       })
-      this._listeners.push(event)
+      this._terminators.push(terminate)
+      return terminate
     }
   }
 
@@ -248,13 +254,17 @@ namespace IPC {
         this._enc_map.set(args[0], enc)
         emit('handshake', `${args[0]}:ACK`, [this._id, this._enc_force ? 1 : 0, public_key])
       })
+
+      listen('terminate', this._id, args => {
+        this._enc_map.delete(args[0])
+      })
     }
 
     connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
       return new Promise((resolve, reject) => {
         const con = this._con_map.get(to)
         if (con !== undefined) {
-          con.terminate()
+          con.terminate(false)
           resolve(con)
         } else {
           const secret = ENCRYPTION.generate_secret()
@@ -268,14 +278,14 @@ namespace IPC {
             CONFIG.ENCRYPTION.MOD
           ])
           function clear() {
-            system.afterEvents.scriptEventReceive.unsubscribe(listener)
+            terminate()
             system.clearRun(timeout_handle)
           }
           const timeout_handle = system.runTimeout(() => {
             reject()
             clear()
           }, timeout)
-          const listener = listen('handshake', `${this._id}:ACK`, args => {
+          const terminate = listen('handshake', `${this._id}:ACK`, args => {
             if (args[0] === to) {
               const enc = args[1] === 1 || encrypted ? ENCRYPTION.generate_shared(secret, args[2]) : false
               const new_con = new Connection(this._id, to, enc)
@@ -289,7 +299,7 @@ namespace IPC {
     }
 
     handle(channel: string, listener: (...args: any[]) => any) {
-      listen('invoke', this.CHANNEL(channel), args => {
+      return listen('invoke', this.CHANNEL(channel), args => {
         this.GUARD(args, enc => {
           const data = this.MAYBE_DECRYPT(args, enc)
           const result = listener(...data)
@@ -300,7 +310,7 @@ namespace IPC {
     }
 
     on(channel: string, listener: (...args: any[]) => void) {
-      listen('send', this.CHANNEL(channel), args => {
+      return listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, enc => {
           const data = this.MAYBE_DECRYPT(args, enc)
           listener(...data)
@@ -309,13 +319,14 @@ namespace IPC {
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
-      const event = listen('send', this.CHANNEL(channel), args => {
+      const terminate = listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, enc => {
           const data = this.MAYBE_DECRYPT(args, enc)
           listener(...data)
-          system.afterEvents.scriptEventReceive.unsubscribe(event)
+          terminate()
         })
       })
+      return terminate
     }
 
     send(channel: string, ...args: any[]): void {
@@ -332,11 +343,11 @@ namespace IPC {
         emit('invoke', this.CHANNEL(channel, key), this.ARGS(data))
         promises.push(
           new Promise(resolve => {
-            const listener = listen('handle', this.CHANNEL(channel), args => {
+            const terminate = listen('handle', this.CHANNEL(channel), args => {
               if (args[0] === key) {
                 const data = this.MAYBE_DECRYPT(args, value)
                 resolve(data)
-                system.afterEvents.scriptEventReceive.unsubscribe(listener)
+                terminate()
               }
             })
           })
@@ -385,7 +396,7 @@ namespace IPC {
 
   function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
     const buffer = new Map<number, { size: number; payloads: Payload[] }>()
-    return system.afterEvents.scriptEventReceive.subscribe(
+    const event_listener = system.afterEvents.scriptEventReceive.subscribe(
       event => {
         if (event.id === `ipc:${event_id}` && event.sourceType === ScriptEventSource.Server) {
           const p: Payload.Packed = JSON.parse(decodeURI(event.message))
@@ -410,6 +421,7 @@ namespace IPC {
       },
       { namespaces: ['ipc'] }
     )
+    return () => system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
   }
 
   function emit(event_id: string, channel: string, args: any[]) {
@@ -464,41 +476,42 @@ namespace IPC {
     ID++
   }
 
+  /** Sends a message with `args` to `channel` */
+  export function send(channel: string, ...args: any[]): void {
+    emit('send', channel, args)
+  }
+
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke(channel: string, ...args: any[]): Promise<any> {
     emit('invoke', channel, args)
     return new Promise(resolve => {
-      const listener = listen('handle', channel, args => {
+      const terminate = listen('handle', channel, args => {
         resolve(args[0])
-        system.afterEvents.scriptEventReceive.unsubscribe(listener)
+        terminate()
       })
     })
   }
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
   export function handle(channel: string, listener: (...args: any[]) => any) {
-    listen('invoke', channel, args => {
+    return listen('invoke', channel, args => {
       const result = listener(...args)
       emit('handle', channel, [result])
     })
   }
 
-  /** Sends a message with `args` to `channel` */
-  export function send(channel: string, ...args: any[]): void {
-    emit('send', channel, args)
-  }
-
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on(channel: string, listener: (...args: any[]) => void) {
-    listen('send', channel, args => listener(...args))
+    return listen('send', channel, args => listener(...args))
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
   export function once(channel: string, listener: (...args: any[]) => void) {
-    const event = listen('send', channel, args => {
+    const terminate = listen('send', channel, args => {
       listener(...args)
-      system.afterEvents.scriptEventReceive.unsubscribe(event)
+      terminate()
     })
+    return terminate
   }
 }
 
