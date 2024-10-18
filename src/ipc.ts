@@ -396,7 +396,7 @@ namespace IPC {
   }
 
   function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
-    const buffer = new Map<number, { size: number; payloads: Payload[] }>()
+    const buffer = new Map<number, { size: number; data_strs: string[] }>()
     const event_listener = system.afterEvents.scriptEventReceive.subscribe(
       event => {
         if (event.id === `ipc:${event_id}` && event.sourceType === ScriptEventSource.Server) {
@@ -405,13 +405,13 @@ namespace IPC {
             const payload: Payload = Payload.fromPacked(p)
             const fragment = buffer.has(payload.id)
               ? buffer.get(payload.id)
-              : buffer.set(payload.id, { size: -1, payloads: [] }).get(payload.id)
+              : buffer.set(payload.id, { size: -1, data_strs: [] }).get(payload.id)
             if (fragment !== undefined) {
               fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
-              fragment.payloads[payload.index ?? 0] = payload
+              fragment.data_strs[payload.index ?? 0] = payload.data
               if (fragment.size !== -1) {
-                if (fragment.payloads.filter(p => p !== null).length === fragment.size) {
-                  const full_str = fragment.payloads.map(contents => contents.data).join('')
+                if (fragment.data_strs.filter(p => p !== null).length === fragment.size) {
+                  const full_str = fragment.data_strs.reduce((acc, curr) => acc + curr, '')
                   callback(JSON.parse(full_str))
                   buffer.delete(payload.id)
                 }
@@ -429,49 +429,59 @@ namespace IPC {
     const CMD = (payload: Payload) => `scriptevent ipc:${event_id} ${encodeURI(Payload.toString(payload))}`
     const RUN = (cmd: string) => world.getDimension('overworld').runCommand(cmd)
     const cmd = CMD({ channel: channel, id: ID, data: '' })
-    const args_str = JSON.stringify(args)
-    const chars = Array.from(args_str)
-    const enc_chars = (function (chars: string[]) {
-      let r: string[] = []
-      let acc: string = ''
-      chars.forEach(c => {
-        if (c === '\\' && acc.length === 0) {
-          acc += c
-        } else {
-          r.push(encodeURI(acc + c))
-          acc = ''
-        }
-      })
-      return r
-    })(Array.from(JSON.stringify(args_str)))
-
     system.runJob(
       (function* () {
-        let idx = 0
+        const args_str = JSON.stringify(args)
+        const chars = new Array<string>()
+        for (const char of args_str) {
+          chars.push(char)
+          yield
+        }
+
+        const enc_chars = new Array()
+        {
+          let acc: string = ''
+          for (const char of JSON.stringify(args_str)) {
+            if (char === '\\' && acc.length === 0) {
+              acc += char
+            } else {
+              enc_chars.push(encodeURI(acc + char))
+              acc = ''
+            }
+            yield
+          }
+        }
+
+        const cmds = new Array<string>()
+
         let str = ''
         let enc_str_len = 0
         for (let i = 0; i < chars.length; i++) {
           const enc_char = enc_chars[i + 1]
-          const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${idx},1`.length
+          const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${cmds.length},1`.length
           if (cmd_len < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
             str += chars[i]
             enc_str_len += enc_char.length
           } else {
-            RUN(CMD({ channel: channel, id: ID, data: str, index: idx }))
-            idx++
+            cmds.push(CMD({ channel: channel, id: ID, data: str, index: cmds.length }))
             str = chars[i]
             enc_str_len = enc_char.length
           }
           yield
         }
 
-        RUN(
+        cmds.push(
           CMD(
-            idx === 0
+            cmds.length === 0
               ? { channel: channel, id: ID, data: str }
-              : { channel: channel, id: ID, data: str, index: idx, final: true }
+              : { channel: channel, id: ID, data: str, index: cmds.length, final: true }
           )
         )
+
+        for (const cmd of cmds) {
+          RUN(cmd)
+          yield
+        }
       })()
     )
     ID++
