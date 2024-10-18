@@ -432,6 +432,8 @@ namespace IPC {
     system.runJob(
       (function* () {
         const args_str = JSON.stringify(args)
+        yield
+
         const chars = new Array<string>()
         for (const char of args_str) {
           chars.push(char)
