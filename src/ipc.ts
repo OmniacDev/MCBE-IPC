@@ -73,20 +73,34 @@ namespace IPC {
       return HEX(mod_exp(NUM(other_key), secret, prime))
     }
 
-    export function encrypt(raw: string, key: string): string {
-      let encrypted = ''
-      for (let i = 0; i < raw.length; i++) {
-        encrypted += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length))
-      }
-      return encrypted
+    export function encrypt(raw: string, key: string): Promise<string> {
+      return new Promise<string>(resolve => {
+        system.runJob(
+          (function* () {
+            let encrypted = ''
+            for (let i = 0; i < raw.length; i++) {
+              encrypted += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+              yield
+            }
+            resolve(encrypted)
+          })()
+        )
+      })
     }
 
-    export function decrypt(encrypted: string, key: string): string {
-      let decrypted = ''
-      for (let i = 0; i < encrypted.length; i++) {
-        decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length))
-      }
-      return decrypted
+    export function decrypt(encrypted: string, key: string): Promise<string> {
+      return new Promise<string>(resolve => {
+        system.runJob(
+          (function* () {
+            let decrypted = ''
+            for (let i = 0; i < encrypted.length; i++) {
+              decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+              yield
+            }
+            resolve(decrypted)
+          })()
+        )
+      })
     }
 
     function mod_exp(base: number, exp: number, mod: number): number {
@@ -123,10 +137,26 @@ namespace IPC {
       return `${id}:${channel}`
     }
     private MAYBE_ENCRYPT(args: any[]) {
-      return this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._enc) : args
+      return new Promise<any>(resolve => {
+        if (this._enc !== false) {
+          ENCRYPTION.encrypt(JSON.stringify(args), this._enc).then(encrypted => {
+            resolve(encrypted)
+          })
+        } else {
+          resolve(args)
+        }
+      })
     }
     private MAYBE_DECRYPT(args: any[]) {
-      return this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._enc)) : args[1]
+      return new Promise<any>(resolve => {
+        if (this._enc !== false) {
+          ENCRYPTION.decrypt(args[1] as string, this._enc).then(decrypted => {
+            resolve(JSON.parse(decrypted))
+          })
+        } else {
+          resolve(args[1])
+        }
+      })
     }
     private GUARD(in_args: any, success: () => void) {
       if (in_args[0] === this._to) {
@@ -158,19 +188,23 @@ namespace IPC {
     }
 
     send(channel: string, ...args: any[]): void {
-      const data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._enc) : args
-      emit('send', this.CHANNEL(channel, this._to), this.ARGS(data))
+      this.MAYBE_ENCRYPT(args).then(data => {
+        emit('send', this.CHANNEL(channel, this._to), this.ARGS(data))
+      })
     }
 
     invoke(channel: string, ...args: any[]): Promise<any> {
-      const data = this.MAYBE_ENCRYPT(args)
-      emit('invoke', this.CHANNEL(channel, this._to), this.ARGS(data))
+      this.MAYBE_ENCRYPT(args).then(data => {
+        emit('invoke', this.CHANNEL(channel, this._to), this.ARGS(data))
+      })
+
       return new Promise(resolve => {
         const terminate = listen('handle', this.CHANNEL(channel), args => {
           this.GUARD(args, () => {
-            const data = this.MAYBE_DECRYPT(args)
-            resolve(data)
-            terminate()
+            this.MAYBE_DECRYPT(args).then(data => {
+              resolve(data)
+              terminate()
+            })
           })
         })
       })
@@ -179,10 +213,12 @@ namespace IPC {
     handle(channel: string, listener: (...args: any[]) => any) {
       const terminate = listen('invoke', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
-          const data = this.MAYBE_DECRYPT(args)
-          const result = listener(...data)
-          const return_data = this.MAYBE_ENCRYPT(result)
-          emit('handle', this.CHANNEL(channel, this._to), this.ARGS(return_data))
+          this.MAYBE_DECRYPT(args).then(data => {
+            const result = listener(...data)
+            this.MAYBE_ENCRYPT(result).then(return_data => {
+              emit('handle', this.CHANNEL(channel, this._to), this.ARGS(return_data))
+            })
+          })
         })
       })
       this._terminators.push(terminate)
@@ -192,8 +228,9 @@ namespace IPC {
     on(channel: string, listener: (...args: any[]) => void) {
       const terminate = listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
-          const data = this.MAYBE_DECRYPT(args)
-          listener(...data)
+          this.MAYBE_DECRYPT(args).then(data => {
+            listener(...data)
+          })
         })
       })
       this._terminators.push(terminate)
@@ -203,8 +240,9 @@ namespace IPC {
     once(channel: string, listener: (...args: any[]) => void) {
       const terminate = listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
-          const data = this.MAYBE_DECRYPT(args)
-          listener(...data)
+          this.MAYBE_DECRYPT(args).then(data => {
+            listener(...data)
+          })
           terminate()
         })
       })
@@ -227,10 +265,26 @@ namespace IPC {
     }
 
     private MAYBE_ENCRYPT(args: any[], encryption: string | false) {
-      return encryption !== false ? ENCRYPTION.encrypt(JSON.stringify(args), encryption) : args
+      return new Promise<any>(resolve => {
+        if (encryption !== false) {
+          ENCRYPTION.encrypt(JSON.stringify(args), encryption).then(encrypted => {
+            resolve(encrypted)
+          })
+        } else {
+          resolve(args)
+        }
+      })
     }
     private MAYBE_DECRYPT(args: any[], encryption: string | false) {
-      return encryption !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, encryption)) : args[1]
+      return new Promise<any>(resolve => {
+        if (encryption !== false) {
+          ENCRYPTION.decrypt(args[1] as string, encryption).then(decrypted => {
+            resolve(JSON.parse(decrypted))
+          })
+        } else {
+          resolve(args[1])
+        }
+      })
     }
     private GUARD(in_args: any, success: (encryption: string | false) => void) {
       const enc = this._enc_map.get(in_args[0]) as string | false
@@ -302,10 +356,12 @@ namespace IPC {
     handle(channel: string, listener: (...args: any[]) => any) {
       return listen('invoke', this.CHANNEL(channel), args => {
         this.GUARD(args, enc => {
-          const data = this.MAYBE_DECRYPT(args, enc)
-          const result = listener(...data)
-          const return_data = this.MAYBE_ENCRYPT(result, enc)
-          emit('handle', this.CHANNEL(channel, args[0]), this.ARGS(return_data))
+          this.MAYBE_DECRYPT(args, enc).then(data => {
+            const result = listener(...data)
+            this.MAYBE_ENCRYPT(result, enc).then(return_data => {
+              emit('handle', this.CHANNEL(channel, args[0]), this.ARGS(return_data))
+            })
+          })
         })
       })
     }
@@ -313,8 +369,9 @@ namespace IPC {
     on(channel: string, listener: (...args: any[]) => void) {
       return listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, enc => {
-          const data = this.MAYBE_DECRYPT(args, enc)
-          listener(...data)
+          this.MAYBE_DECRYPT(args, enc).then(data => {
+            listener(...data)
+          })
         })
       })
     }
@@ -322,8 +379,9 @@ namespace IPC {
     once(channel: string, listener: (...args: any[]) => void) {
       const terminate = listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, enc => {
-          const data = this.MAYBE_DECRYPT(args, enc)
-          listener(...data)
+          this.MAYBE_DECRYPT(args, enc).then(data => {
+            listener(...data)
+          })
           terminate()
         })
       })
@@ -332,23 +390,27 @@ namespace IPC {
 
     send(channel: string, ...args: any[]): void {
       this._enc_map.forEach((value, key) => {
-        const data = this.MAYBE_ENCRYPT(args, value)
-        emit('send', this.CHANNEL(channel, key), this.ARGS(data))
+        this.MAYBE_ENCRYPT(args, value).then(data => {
+          emit('send', this.CHANNEL(channel, key), this.ARGS(data))
+        })
       })
     }
 
     invoke(channel: string, ...args: any[]): Promise<any>[] {
       const promises: Promise<any>[] = []
       this._enc_map.forEach((value, key) => {
-        const data = this.MAYBE_ENCRYPT(args, value)
-        emit('invoke', this.CHANNEL(channel, key), this.ARGS(data))
+        this.MAYBE_ENCRYPT(args, value).then(data => {
+          emit('invoke', this.CHANNEL(channel, key), this.ARGS(data))
+        })
+
         promises.push(
           new Promise(resolve => {
             const terminate = listen('handle', this.CHANNEL(channel), args => {
               if (args[0] === key) {
-                const data = this.MAYBE_DECRYPT(args, value)
-                resolve(data)
-                terminate()
+                this.MAYBE_DECRYPT(args, value).then(data => {
+                  resolve(data)
+                  terminate()
+                })
               }
             })
           })
