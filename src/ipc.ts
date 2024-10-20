@@ -458,7 +458,7 @@ namespace IPC {
   }
 
   function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
-    const buffer = new Map<number, { size: number; data_strs: string[] }>()
+    const buffer = new Map<number, { size: number; data_strs: string[]; data_size: number }>()
     const event_listener = system.afterEvents.scriptEventReceive.subscribe(
       event => {
         if (event.id === `ipc:${event_id}` && event.sourceType === ScriptEventSource.Server) {
@@ -467,12 +467,13 @@ namespace IPC {
             const payload: Payload = Payload.fromPacked(p)
             const fragment = buffer.has(payload.id)
               ? buffer.get(payload.id)
-              : buffer.set(payload.id, { size: -1, data_strs: [] }).get(payload.id)
+              : buffer.set(payload.id, { size: -1, data_strs: [], data_size: 0 }).get(payload.id)
             if (fragment !== undefined) {
               fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
               fragment.data_strs[payload.index ?? 0] = payload.data
+              fragment.data_size += (payload.index ?? 0) + 1
               if (fragment.size !== -1) {
-                if (fragment.data_strs.filter(p => p !== null).length === fragment.size) {
+                if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
                   const full_str = fragment.data_strs.reduce((acc, curr) => acc + curr, '')
                   callback(JSON.parse(full_str))
                   buffer.delete(payload.id)
@@ -501,7 +502,7 @@ namespace IPC {
           yield
         }
 
-        const enc_chars = new Array()
+        const enc_chars = new Array<string>()
         {
           let acc: string = ''
           for (const char of JSON.stringify(args_str)) {
@@ -515,36 +516,31 @@ namespace IPC {
           }
         }
 
-        const cmds = new Array<string>()
-
+        let len = 0
         let str = ''
         let enc_str_len = 0
         for (let i = 0; i < chars.length; i++) {
           const enc_char = enc_chars[i + 1]
-          const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${cmds.length},1`.length
+          const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${len},1`.length
           if (cmd_len < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
             str += chars[i]
             enc_str_len += enc_char.length
           } else {
-            cmds.push(CMD({ channel: channel, id: ID, data: str, index: cmds.length }))
+            RUN(CMD({ channel: channel, id: ID, data: str, index: len }))
+            len++
             str = chars[i]
             enc_str_len = enc_char.length
           }
           yield
         }
 
-        cmds.push(
+        RUN(
           CMD(
-            cmds.length === 0
+            len === 0
               ? { channel: channel, id: ID, data: str }
-              : { channel: channel, id: ID, data: str, index: cmds.length, final: true }
+              : { channel: channel, id: ID, data: str, index: len, final: true }
           )
         )
-
-        for (const cmd of cmds) {
-          RUN(cmd)
-          yield
-        }
       })()
     )
     ID++
