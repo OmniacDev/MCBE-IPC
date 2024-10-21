@@ -266,27 +266,19 @@ namespace IPC {
       return `${id}:${channel}`
     }
 
-    private MAYBE_ENCRYPT(args: any[], encryption: string | false) {
-      return new Promise<any>(resolve => {
-        if (encryption !== false) {
-          ENCRYPTION.encrypt(JSON.stringify(args), encryption).then(encrypted => {
-            resolve(encrypted)
-          })
-        } else {
-          resolve(args)
-        }
-      })
+    private *MAYBE_ENCRYPT(args: any[], encryption: string | false): Generator<void, any, void> {
+      if (encryption !== false) {
+        return yield* ENCRYPTION.encrypt(JSON.stringify(args), encryption)
+      } else {
+        return args
+      }
     }
-    private MAYBE_DECRYPT(args: any[], encryption: string | false) {
-      return new Promise<any>(resolve => {
-        if (encryption !== false) {
-          ENCRYPTION.decrypt(args[1] as string, encryption).then(decrypted => {
-            resolve(JSON.parse(decrypted))
-          })
-        } else {
-          resolve(args[1])
-        }
-      })
+    private *MAYBE_DECRYPT(args: any[], encryption: string | false): Generator<void, any, void> {
+      if (encryption !== false) {
+        return JSON.parse(yield* ENCRYPTION.decrypt(args[1] as string, encryption))
+      } else {
+        return args[1]
+      }
     }
     private GUARD(in_args: any, success: (encryption: string | false) => void) {
       const enc = this._enc_map.get(in_args[0]) as string | false
@@ -356,34 +348,45 @@ namespace IPC {
     }
 
     handle(channel: string, listener: (...args: any[]) => any) {
+      const $ = this
       return listen('invoke', this.CHANNEL(channel), args => {
         this.GUARD(args, enc => {
-          this.MAYBE_DECRYPT(args, enc).then(data => {
-            const result = listener(...data)
-            this.MAYBE_ENCRYPT(result, enc).then(return_data => {
-              emit('handle', this.CHANNEL(channel, args[0]), this.ARGS(return_data))
-            })
-          })
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args, enc)
+              const result = listener(...data)
+              const return_data = yield* $.MAYBE_ENCRYPT(result, enc)
+              yield* emit('handle', $.CHANNEL(channel, args[0]), $.ARGS(return_data))
+            })()
+          )
         })
       })
     }
 
     on(channel: string, listener: (...args: any[]) => void) {
+      const $ = this
       return listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, enc => {
-          this.MAYBE_DECRYPT(args, enc).then(data => {
-            listener(...data)
-          })
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args, enc)
+              listener(...data)
+            })()
+          )
         })
       })
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
+      const $ = this
       const terminate = listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, enc => {
-          this.MAYBE_DECRYPT(args, enc).then(data => {
-            listener(...data)
-          })
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args, enc)
+              listener(...data)
+            })()
+          )
           terminate()
         })
       })
@@ -391,33 +394,45 @@ namespace IPC {
     }
 
     send(channel: string, ...args: any[]): void {
-      this._enc_map.forEach((value, key) => {
-        this.MAYBE_ENCRYPT(args, value).then(data => {
-          emit('send', this.CHANNEL(channel, key), this.ARGS(data))
-        })
-      })
+      const $ = this
+      system.runJob(
+        (function* () {
+          for (const [key, value] of $._enc_map) {
+            const data = yield* $.MAYBE_ENCRYPT(args, value)
+            yield* emit('send', $.CHANNEL(channel, key), $.ARGS(data))
+          }
+        })()
+      )
     }
 
     invoke(channel: string, ...args: any[]): Promise<any>[] {
+      const $ = this
       const promises: Promise<any>[] = []
-      this._enc_map.forEach((value, key) => {
-        this.MAYBE_ENCRYPT(args, value).then(data => {
-          emit('invoke', this.CHANNEL(channel, key), this.ARGS(data))
-        })
+
+      for (const [key, value] of $._enc_map) {
+        system.runJob(
+          (function* () {
+            const data = yield* $.MAYBE_ENCRYPT(args, value)
+            yield* emit('invoke', $.CHANNEL(channel, key), $.ARGS(data))
+          })()
+        )
 
         promises.push(
           new Promise(resolve => {
             const terminate = listen('handle', this.CHANNEL(channel), args => {
               if (args[0] === key) {
-                this.MAYBE_DECRYPT(args, value).then(data => {
-                  resolve(data)
-                  terminate()
-                })
+                system.runJob(
+                  (function* () {
+                    const data = yield* $.MAYBE_DECRYPT(args, value)
+                    resolve(data)
+                  })()
+                )
+                terminate()
               }
             })
           })
         )
-      })
+      }
       return promises
     }
   }
