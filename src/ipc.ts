@@ -46,7 +46,7 @@ namespace IPC {
        * @default 2048
        * @warning Modify only if you know what you're doing, incorrect values can cause issues
        */
-      export let MAX_CMD_LENGTH: number = 2048
+      export let MAX_MSG_LENGTH: number = 2048
     }
   }
 
@@ -536,9 +536,9 @@ namespace IPC {
   function* emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
     const ID = UUID.generate()
 
-    const CMD = (payload: Payload) => `scriptevent ipc:${event_id} ${encodeURI(Payload.toString(payload))}`
-    const RUN = (cmd: string) => world.getDimension('overworld').runCommand(cmd)
-    const cmd = CMD({ channel: channel, id: ID, data: '' })
+    const MSG = (payload: Payload) => encodeURI(Payload.toString(payload))
+    const RUN = (msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${msg}`)
+    const msg = MSG({ channel: channel, id: ID, data: '' })
 
     const args_str = JSON.stringify(args)
 
@@ -567,12 +567,12 @@ namespace IPC {
     let enc_str_len = 0
     for (let i = 0; i < chars.length; i++) {
       const enc_char = enc_chars[i + 1]
-      const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${len},1`.length
-      if (cmd_len < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+      const msg_len = enc_str_len + enc_char.length + msg.length + `,${len},1`.length
+      if (msg_len < CONFIG.FRAGMENTATION.MAX_MSG_LENGTH) {
         str += chars[i]
         enc_str_len += enc_char.length
       } else {
-        RUN(CMD({ channel: channel, id: ID, data: str, index: len }))
+        RUN(MSG({ channel: channel, id: ID, data: str, index: len }))
         len++
         str = chars[i]
         enc_str_len = enc_char.length
@@ -581,7 +581,7 @@ namespace IPC {
     }
 
     RUN(
-      CMD(
+      MSG(
         len === 0
           ? { channel: channel, id: ID, data: str }
           : { channel: channel, id: ID, data: str, index: len, final: true }
