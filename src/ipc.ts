@@ -478,6 +478,7 @@ namespace IPC {
 
   function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
     const buffer = new Map<number, { size: number; data_strs: string[]; data_size: number }>()
+    const jobs = new Array<number>()
     const event_listener = system.afterEvents.scriptEventReceive.subscribe(
       event => {
         if (event.id === `ipc:${event_id}` && event.sourceType === ScriptEventSource.Server) {
@@ -493,8 +494,17 @@ namespace IPC {
               fragment.data_size += (payload.index ?? 0) + 1
               if (fragment.size !== -1) {
                 if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-                  const full_str = fragment.data_strs.reduce((acc, curr) => acc + curr, '')
-                  callback(JSON.parse(full_str))
+                  const job = system.runJob(
+                    (function* () {
+                      let full_str = ''
+                      for (const str of fragment.data_strs) {
+                        full_str += str
+                        yield
+                      }
+                      callback(JSON.parse(full_str))
+                    })()
+                  )
+                  jobs.push(job)
                   buffer.delete(payload.id)
                 }
               }
@@ -504,7 +514,13 @@ namespace IPC {
       },
       { namespaces: ['ipc'] }
     )
-    return () => system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
+    return () => {
+      system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
+      for (const job of jobs) {
+        system.clearJob(job)
+        jobs.length = 0
+      }
+    }
   }
 
   function* emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
