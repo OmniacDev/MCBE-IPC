@@ -502,10 +502,10 @@ namespace IPC {
                         yield
                       }
                       callback(JSON.parse(full_str))
+                      buffer.delete(payload.id)
                     })()
                   )
                   jobs.push(job)
-                  buffer.delete(payload.id)
                 }
               }
             }
@@ -518,8 +518,8 @@ namespace IPC {
       system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
       for (const job of jobs) {
         system.clearJob(job)
-        jobs.length = 0
       }
+      jobs.length = 0
     }
   }
 
@@ -550,6 +550,9 @@ namespace IPC {
       }
     }
 
+    const emit_id = ID
+    ID++
+
     let len = 0
     let str = ''
     let enc_str_len = 0
@@ -560,7 +563,7 @@ namespace IPC {
         str += chars[i]
         enc_str_len += enc_char.length
       } else {
-        RUN(CMD({ channel: channel, id: ID, data: str, index: len }))
+        RUN(CMD({ channel: channel, id: emit_id, data: str, index: len }))
         len++
         str = chars[i]
         enc_str_len = enc_char.length
@@ -571,11 +574,10 @@ namespace IPC {
     RUN(
       CMD(
         len === 0
-          ? { channel: channel, id: ID, data: str }
-          : { channel: channel, id: ID, data: str, index: len, final: true }
+          ? { channel: channel, id: emit_id, data: str }
+          : { channel: channel, id: emit_id, data: str, index: len, final: true }
       )
     )
-    ID++
   }
 
   /** Sends a message with `args` to `channel` */
