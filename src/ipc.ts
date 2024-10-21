@@ -25,8 +25,6 @@
 import { world, system, ScriptEventSource, ScriptEventCommandMessageAfterEvent } from '@minecraft/server'
 
 namespace IPC {
-  let ID = 0
-
   export namespace CONFIG {
     export namespace ENCRYPTION {
       /**
@@ -109,6 +107,18 @@ namespace IPC {
     }
     function NUM(hex: string): number {
       return parseInt(hex, 16)
+    }
+  }
+
+  namespace UUID {
+    const LUT: string[] = Array.from<string, string>({ length: 256 }, (_v, i) => {
+      return (i < 16 ? '0' : '') + i.toString(16).toUpperCase()
+    })
+
+    export function generate(): string {
+      const r = (Math.random() * 0x100000000) >>> 0
+
+      return [LUT[r & 0xff], LUT[(r >> 8) & 0xff], LUT[(r >> 16) & 0xff], LUT[(r >> 24) & 0xff]].join('')
     }
   }
 
@@ -441,7 +451,7 @@ namespace IPC {
 
   interface Payload {
     channel: string
-    id: number
+    id: string
     data: string
     index?: number
     final?: boolean
@@ -449,9 +459,9 @@ namespace IPC {
 
   namespace Payload {
     export type Packed =
-      | [string, number, string]
-      | [string, number, string, number]
-      | [string, number, string, number, number]
+      | [string, string, string]
+      | [string, string, string, number]
+      | [string, string, string, number, number]
     export function toString(p: Payload): string {
       return JSON.stringify(toPacked(p))
     }
@@ -477,7 +487,7 @@ namespace IPC {
   }
 
   function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
-    const buffer = new Map<number, { size: number; data_strs: string[]; data_size: number }>()
+    const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
     const jobs = new Array<number>()
     const event_listener = system.afterEvents.scriptEventReceive.subscribe(
       event => {
@@ -524,6 +534,8 @@ namespace IPC {
   }
 
   function* emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
+    const ID = UUID.generate()
+
     const CMD = (payload: Payload) => `scriptevent ipc:${event_id} ${encodeURI(Payload.toString(payload))}`
     const RUN = (cmd: string) => world.getDimension('overworld').runCommand(cmd)
     const cmd = CMD({ channel: channel, id: ID, data: '' })
@@ -550,9 +562,6 @@ namespace IPC {
       }
     }
 
-    const emit_id = ID
-    ID++
-
     let len = 0
     let str = ''
     let enc_str_len = 0
@@ -563,7 +572,7 @@ namespace IPC {
         str += chars[i]
         enc_str_len += enc_char.length
       } else {
-        RUN(CMD({ channel: channel, id: emit_id, data: str, index: len }))
+        RUN(CMD({ channel: channel, id: ID, data: str, index: len }))
         len++
         str = chars[i]
         enc_str_len = enc_char.length
@@ -574,8 +583,8 @@ namespace IPC {
     RUN(
       CMD(
         len === 0
-          ? { channel: channel, id: emit_id, data: str }
-          : { channel: channel, id: emit_id, data: str, index: len, final: true }
+          ? { channel: channel, id: ID, data: str }
+          : { channel: channel, id: ID, data: str, index: len, final: true }
       )
     )
   }
