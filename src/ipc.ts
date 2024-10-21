@@ -73,34 +73,22 @@ namespace IPC {
       return HEX(mod_exp(NUM(other_key), secret, prime))
     }
 
-    export function encrypt(raw: string, key: string): Promise<string> {
-      return new Promise<string>(resolve => {
-        system.runJob(
-          (function* () {
-            let encrypted = ''
-            for (let i = 0; i < raw.length; i++) {
-              encrypted += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length))
-              yield
-            }
-            resolve(encrypted)
-          })()
-        )
-      })
+    export function* encrypt(raw: string, key: string): Generator<void, string, void> {
+      let encrypted = ''
+      for (let i = 0; i < raw.length; i++) {
+        encrypted += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+        yield
+      }
+      return encrypted
     }
 
-    export function decrypt(encrypted: string, key: string): Promise<string> {
-      return new Promise<string>(resolve => {
-        system.runJob(
-          (function* () {
-            let decrypted = ''
-            for (let i = 0; i < encrypted.length; i++) {
-              decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length))
-              yield
-            }
-            resolve(decrypted)
-          })()
-        )
-      })
+    export function* decrypt(encrypted: string, key: string): Generator<void, string, void> {
+      let decrypted = ''
+      for (let i = 0; i < encrypted.length; i++) {
+        decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+        yield
+      }
+      return decrypted
     }
 
     function mod_exp(base: number, exp: number, mod: number): number {
@@ -136,27 +124,19 @@ namespace IPC {
     private CHANNEL(channel: string, id: string = this._from) {
       return `${id}:${channel}`
     }
-    private MAYBE_ENCRYPT(args: any[]) {
-      return new Promise<any>(resolve => {
-        if (this._enc !== false) {
-          ENCRYPTION.encrypt(JSON.stringify(args), this._enc).then(encrypted => {
-            resolve(encrypted)
-          })
-        } else {
-          resolve(args)
-        }
-      })
+    private *MAYBE_ENCRYPT(args: any[]): Generator<void, any, void> {
+      if (this._enc !== false) {
+        return yield* ENCRYPTION.encrypt(JSON.stringify(args), this._enc)
+      } else {
+        return args
+      }
     }
-    private MAYBE_DECRYPT(args: any[]) {
-      return new Promise<any>(resolve => {
-        if (this._enc !== false) {
-          ENCRYPTION.decrypt(args[1] as string, this._enc).then(decrypted => {
-            resolve(JSON.parse(decrypted))
-          })
-        } else {
-          resolve(args[1])
-        }
-      })
+    private *MAYBE_DECRYPT(args: any[]): Generator<void, any, void> {
+      if (this._enc !== false) {
+        return JSON.parse(yield* ENCRYPTION.decrypt(args[1] as string, this._enc))
+      } else {
+        return args[1]
+      }
     }
     private GUARD(in_args: any, success: () => void) {
       if (in_args[0] === this._to) {
@@ -188,37 +168,51 @@ namespace IPC {
     }
 
     send(channel: string, ...args: any[]): void {
-      this.MAYBE_ENCRYPT(args).then(data => {
-        emit('send', this.CHANNEL(channel, this._to), this.ARGS(data))
-      })
+      const $ = this
+      system.runJob(
+        (function* () {
+          const data = yield* $.MAYBE_ENCRYPT(args)
+          yield* emit('send', $.CHANNEL(channel, $._to), $.ARGS(data))
+        })()
+      )
     }
 
     invoke(channel: string, ...args: any[]): Promise<any> {
-      this.MAYBE_ENCRYPT(args).then(data => {
-        emit('invoke', this.CHANNEL(channel, this._to), this.ARGS(data))
-      })
+      const $ = this
+      system.runJob(
+        (function* () {
+          const data = yield* $.MAYBE_ENCRYPT(args)
+          yield* emit('invoke', $.CHANNEL(channel, $._to), $.ARGS(data))
+        })()
+      )
 
       return new Promise(resolve => {
         const terminate = listen('handle', this.CHANNEL(channel), args => {
           this.GUARD(args, () => {
-            this.MAYBE_DECRYPT(args).then(data => {
-              resolve(data)
-              terminate()
-            })
+            system.runJob(
+              (function* () {
+                const data = yield* $.MAYBE_DECRYPT(args)
+                resolve(data)
+              })()
+            )
+            terminate()
           })
         })
       })
     }
 
     handle(channel: string, listener: (...args: any[]) => any) {
+      const $ = this
       const terminate = listen('invoke', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
-          this.MAYBE_DECRYPT(args).then(data => {
-            const result = listener(...data)
-            this.MAYBE_ENCRYPT(result).then(return_data => {
-              emit('handle', this.CHANNEL(channel, this._to), this.ARGS(return_data))
-            })
-          })
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args)
+              const result = listener(...data)
+              const return_data = yield* $.MAYBE_ENCRYPT(result)
+              yield* emit('handle', $.CHANNEL(channel, $._to), $.ARGS(return_data))
+            })()
+          )
         })
       })
       this._terminators.push(terminate)
@@ -226,11 +220,15 @@ namespace IPC {
     }
 
     on(channel: string, listener: (...args: any[]) => void) {
+      const $ = this
       const terminate = listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
-          this.MAYBE_DECRYPT(args).then(data => {
-            listener(...data)
-          })
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args)
+              listener(...data)
+            })()
+          )
         })
       })
       this._terminators.push(terminate)
@@ -238,11 +236,15 @@ namespace IPC {
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
+      const $ = this
       const terminate = listen('send', this.CHANNEL(channel), args => {
         this.GUARD(args, () => {
-          this.MAYBE_DECRYPT(args).then(data => {
-            listener(...data)
-          })
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args)
+              listener(...data)
+            })()
+          )
           terminate()
         })
       })
@@ -488,60 +490,57 @@ namespace IPC {
     return () => system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
   }
 
-  function emit(event_id: string, channel: string, args: any[]) {
+  function* emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
     const CMD = (payload: Payload) => `scriptevent ipc:${event_id} ${encodeURI(Payload.toString(payload))}`
     const RUN = (cmd: string) => world.getDimension('overworld').runCommand(cmd)
     const cmd = CMD({ channel: channel, id: ID, data: '' })
-    system.runJob(
-      (function* () {
-        const args_str = JSON.stringify(args)
 
-        const chars = new Array<string>()
-        for (const char of args_str) {
-          chars.push(char)
-          yield
+    const args_str = JSON.stringify(args)
+
+    const chars = new Array<string>()
+    for (const char of args_str) {
+      chars.push(char)
+      yield
+    }
+
+    const enc_chars = new Array<string>()
+    {
+      let acc: string = ''
+      for (const char of JSON.stringify(args_str)) {
+        if (char === '\\' && acc.length === 0) {
+          acc += char
+        } else {
+          enc_chars.push(encodeURI(acc + char))
+          acc = ''
         }
+        yield
+      }
+    }
 
-        const enc_chars = new Array<string>()
-        {
-          let acc: string = ''
-          for (const char of JSON.stringify(args_str)) {
-            if (char === '\\' && acc.length === 0) {
-              acc += char
-            } else {
-              enc_chars.push(encodeURI(acc + char))
-              acc = ''
-            }
-            yield
-          }
-        }
+    let len = 0
+    let str = ''
+    let enc_str_len = 0
+    for (let i = 0; i < chars.length; i++) {
+      const enc_char = enc_chars[i + 1]
+      const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${len},1`.length
+      if (cmd_len < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+        str += chars[i]
+        enc_str_len += enc_char.length
+      } else {
+        RUN(CMD({ channel: channel, id: ID, data: str, index: len }))
+        len++
+        str = chars[i]
+        enc_str_len = enc_char.length
+      }
+      yield
+    }
 
-        let len = 0
-        let str = ''
-        let enc_str_len = 0
-        for (let i = 0; i < chars.length; i++) {
-          const enc_char = enc_chars[i + 1]
-          const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${len},1`.length
-          if (cmd_len < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
-            str += chars[i]
-            enc_str_len += enc_char.length
-          } else {
-            RUN(CMD({ channel: channel, id: ID, data: str, index: len }))
-            len++
-            str = chars[i]
-            enc_str_len = enc_char.length
-          }
-          yield
-        }
-
-        RUN(
-          CMD(
-            len === 0
-              ? { channel: channel, id: ID, data: str }
-              : { channel: channel, id: ID, data: str, index: len, final: true }
-          )
-        )
-      })()
+    RUN(
+      CMD(
+        len === 0
+          ? { channel: channel, id: ID, data: str }
+          : { channel: channel, id: ID, data: str, index: len, final: true }
+      )
     )
     ID++
   }
