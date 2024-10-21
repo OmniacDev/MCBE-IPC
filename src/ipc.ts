@@ -163,7 +163,7 @@ namespace IPC {
       this._terminators.forEach(terminate => terminate())
       this._terminators.length = 0
       if (notify) {
-        emit('terminate', this._to, [this._from])
+        system.runJob(emit('terminate', this._to, [this._from]))
       }
     }
 
@@ -301,7 +301,7 @@ namespace IPC {
         const public_key = ENCRYPTION.generate_public(secret, args[4], args[3])
         const enc = args[1] === 1 || this._enc_force ? ENCRYPTION.generate_shared(secret, args[2], args[3]) : false
         this._enc_map.set(args[0], enc)
-        emit('handshake', `${args[0]}:ACK`, [this._id, this._enc_force ? 1 : 0, public_key])
+        system.runJob(emit('handshake', `${args[0]}:ACK`, [this._id, this._enc_force ? 1 : 0, public_key]))
       })
 
       listen('terminate', this._id, args => {
@@ -319,13 +319,15 @@ namespace IPC {
           const secret = ENCRYPTION.generate_secret()
           const public_key = ENCRYPTION.generate_public(secret)
           const enc_flag = encrypted ? 1 : 0
-          emit('handshake', `${to}:SYN`, [
-            this._id,
-            enc_flag,
-            public_key,
-            CONFIG.ENCRYPTION.PRIME,
-            CONFIG.ENCRYPTION.MOD
-          ])
+          system.runJob(
+            emit('handshake', `${to}:SYN`, [
+              this._id,
+              enc_flag,
+              public_key,
+              CONFIG.ENCRYPTION.PRIME,
+              CONFIG.ENCRYPTION.MOD
+            ])
+          )
           function clear() {
             terminate()
             system.clearRun(timeout_handle)
@@ -562,12 +564,12 @@ namespace IPC {
 
   /** Sends a message with `args` to `channel` */
   export function send(channel: string, ...args: any[]): void {
-    emit('send', channel, args)
+    system.runJob(emit('send', channel, args))
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke(channel: string, ...args: any[]): Promise<any> {
-    emit('invoke', channel, args)
+    system.runJob(emit('invoke', channel, args))
     return new Promise(resolve => {
       const terminate = listen('handle', channel, args => {
         resolve(args[0])
@@ -580,7 +582,7 @@ namespace IPC {
   export function handle(channel: string, listener: (...args: any[]) => any) {
     return listen('invoke', channel, args => {
       const result = listener(...args)
-      emit('handle', channel, [result])
+      system.runJob(emit('handle', channel, [result]))
     })
   }
 
