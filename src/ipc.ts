@@ -48,7 +48,7 @@ namespace CRYPTO {
   export function make_secret(mod: number = CRYPTO.MOD): number {
     return Math.floor(Math.random() * (mod - 1)) + 1
   }
-  
+
   export function* make_public(
     secret: number,
     mod: number = CRYPTO.MOD,
@@ -56,7 +56,7 @@ namespace CRYPTO {
   ): Generator<void, string, void> {
     return to_HEX(yield* mod_exp(mod, secret, prime))
   }
-  
+
   export function* make_shared(
     secret: number,
     other: string,
@@ -64,7 +64,7 @@ namespace CRYPTO {
   ): Generator<void, string, void> {
     return to_HEX(yield* mod_exp(to_NUM(other), secret, prime))
   }
-  
+
   export function* encrypt(raw: string, key: string): Generator<void, string, void> {
     let encrypted = ''
     for (let i = 0; i < raw.length; i++) {
@@ -73,7 +73,7 @@ namespace CRYPTO {
     }
     return encrypted
   }
-  
+
   export function* decrypt(encrypted: string, key: string): Generator<void, string, void> {
     let decrypted = ''
     for (let i = 0; i < encrypted.length; i++) {
@@ -94,7 +94,7 @@ namespace NET {
     index?: number
     final?: boolean
   }
-  
+
   namespace Payload {
     export type Packed =
       | [string, string, string]
@@ -106,7 +106,7 @@ namespace NET {
     export function fromString(s: string): Payload {
       return fromPacked(JSON.parse(s) as Packed)
     }
-  
+
     export function toPacked(p: Payload): Packed {
       return p.index !== undefined
         ? p.final !== undefined
@@ -114,7 +114,7 @@ namespace NET {
           : [p.channel, p.id, p.data, p.index]
         : [p.channel, p.id, p.data]
     }
-  
+
     export function fromPacked(p: Packed): Payload {
       return p[3] !== undefined
         ? p[4] !== undefined
@@ -133,7 +133,7 @@ namespace NET {
 
     return [LUT[r & 0xff], LUT[(r >> 8) & 0xff], LUT[(r >> 16) & 0xff], LUT[(r >> 24) & 0xff]].join('')
   }
-  
+
   export function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
     const jobs = new Array<number>()
@@ -180,22 +180,22 @@ namespace NET {
       jobs.length = 0
     }
   }
-  
+
   export function* emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
     const ID = generate_id()
-  
+
     const MSG = (payload: Payload) => encodeURI(Payload.toString(payload))
     const RUN = (msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${msg}`)
     const msg = MSG({ channel: channel, id: ID, data: '' })
-  
+
     const args_str = JSON.stringify(args)
-  
+
     const chars = new Array<string>()
     for (const char of args_str) {
       chars.push(char)
       yield
     }
-  
+
     const enc_chars = new Array<string>()
     {
       let acc: string = ''
@@ -209,7 +209,7 @@ namespace NET {
         yield
       }
     }
-  
+
     let len = 0
     let str = ''
     let enc_str_len = 0
@@ -227,7 +227,7 @@ namespace NET {
       }
       yield
     }
-  
+
     RUN(
       MSG(
         len === 0
@@ -259,7 +259,7 @@ namespace IPC {
         return args[1]
       }
     }
-    
+
     get from() {
       return this._from
     }
@@ -415,13 +415,15 @@ namespace IPC {
       this._con_map = new Map<string, Connection>()
       this._enc_force = force_encryption
       NET.listen('handshake', `${this._id}:SYN`, args => {
-        system.runJob(function* (){
-          const secret = CRYPTO.make_secret(args[4])
-          const public_key = yield* CRYPTO.make_public(secret, args[4], args[3])
-          const enc = args[1] === 1 || $._enc_force ? yield* CRYPTO.make_shared(secret, args[2], args[3]) : false
-          $._enc_map.set(args[0], enc)
-          yield* NET.emit('handshake', `${args[0]}:ACK`, [$._id, $._enc_force ? 1 : 0, public_key])
-        }())
+        system.runJob(
+          (function* () {
+            const secret = CRYPTO.make_secret(args[4])
+            const public_key = yield* CRYPTO.make_public(secret, args[4], args[3])
+            const enc = args[1] === 1 || $._enc_force ? yield* CRYPTO.make_shared(secret, args[2], args[3]) : false
+            $._enc_map.set(args[0], enc)
+            yield* NET.emit('handshake', `${args[0]}:ACK`, [$._id, $._enc_force ? 1 : 0, public_key])
+          })()
+        )
       })
 
       NET.listen('terminate', this._id, args => {
@@ -439,16 +441,11 @@ namespace IPC {
         } else {
           const secret = CRYPTO.make_secret()
           const enc_flag = encrypted ? 1 : 0
-          system.runJob(function* (){
-            const public_key = yield* CRYPTO.make_public(secret)
-              yield* NET.emit('handshake', `${to}:SYN`, [
-                $._id,
-                enc_flag,
-                public_key,
-                CRYPTO.PRIME,
-                CRYPTO.MOD
-              ])
-            }()
+          system.runJob(
+            (function* () {
+              const public_key = yield* CRYPTO.make_public(secret)
+              yield* NET.emit('handshake', `${to}:SYN`, [$._id, enc_flag, public_key, CRYPTO.PRIME, CRYPTO.MOD])
+            })()
           )
           function clear() {
             terminate()
@@ -460,12 +457,14 @@ namespace IPC {
           }, timeout)
           const terminate = NET.listen('handshake', `${this._id}:ACK`, args => {
             if (args[0] === to) {
-              system.runJob(function*(){
-                const enc = args[1] === 1 || encrypted ? yield* CRYPTO.make_shared(secret, args[2]) : false
-                const new_con = new Connection($._id, to, enc)
-                $._con_map.set(to, new_con)
-                resolve(new_con)
-              }())
+              system.runJob(
+                (function* () {
+                  const enc = args[1] === 1 || encrypted ? yield* CRYPTO.make_shared(secret, args[2]) : false
+                  const new_con = new Connection($._id, to, enc)
+                  $._con_map.set(to, new_con)
+                  resolve(new_con)
+                })()
+              )
               clear()
             }
           })
