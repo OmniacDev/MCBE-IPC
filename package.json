@@ -2,15 +2,16 @@
   "name": "mcbe-ipc",
   "author": "OmniacDev",
   "description": "Experimental IPC system for MCBE Script API projects",
-  "license": "Apache-2.0",
-  "version": "1.0.0",
+  "license": "MIT",
+  "version": "1.7.0",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && uglifyjs dist/ipc.js --mangle --compress --output dist/ipc.min.js",
     "format": "prettier --write src"
   },
   "devDependencies": {
     "prettier": "^3.3.3",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "uglify-js": "^3.19.3"
   },
   "dependencies": {
     "@minecraft/server": "^1.13.0"

@@ -24,206 +24,72 @@
 
 import { world, system, ScriptEventSource } from '@minecraft/server'
 
-namespace IPC {
-  let ID = 0
+namespace CRYPTO {
+  export const PRIME: number = 19893121
+  export const MOD: number = 341
 
-  export namespace CONFIG {
-    export namespace ENCRYPTION {
-      /**
-       * @description Used to generate secrets, must be a prime number
-       * @default 19893121
-       * @warning Modify only if you know what you're doing, incorrect values can cause issues
-       */
-      export let PRIME: number = 19893121
-      /**
-       * @description Used to generate secrets, must be a prime root of {@link PRIME}
-       * @default 341
-       * @warning Modify only if you know what you're doing, incorrect values can cause issues
-       */
-      export let MOD: number = 341
-    }
-    export namespace FRAGMENTATION {
-      /**
-       * @description Used when fragmenting data strings
-       * @default 2048
-       * @warning Modify only if you know what you're doing, incorrect values can cause issues
-       */
-      export let MAX_CMD_LENGTH: number = 2048
-    }
-  }
+  const to_HEX = (n: number): string => n.toString(16).toUpperCase()
+  const to_NUM = (h: string): number => parseInt(h, 16)
 
-  namespace ENCRYPTION {
-    export function generate_secret(mod: number = CONFIG.ENCRYPTION.MOD): number {
-      return Math.floor(Math.random() * (mod - 1)) + 1
-    }
-
-    export function generate_public(
-      secret: number,
-      mod: number = CONFIG.ENCRYPTION.MOD,
-      prime: number = CONFIG.ENCRYPTION.PRIME
-    ): string {
-      return HEX(mod_exp(mod, secret, prime))
-    }
-
-    export function generate_shared(
-      secret: number,
-      other_key: string,
-      prime: number = CONFIG.ENCRYPTION.PRIME
-    ): string {
-      return HEX(mod_exp(NUM(other_key), secret, prime))
-    }
-
-    export function encrypt(raw: string, key: string): string {
-      let encrypted = ''
-      for (let i = 0; i < raw.length; i++) {
-        encrypted += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+  function* mod_exp(base: number, exp: number, mod: number): Generator<void, number, void> {
+    let result = 1
+    base = base % mod
+    while (exp > 0) {
+      if (exp % 2 === 1) {
+        result = (result * base) % mod
       }
-      return encrypted
+      exp = Math.floor(exp / 2)
+      base = (base * base) % mod
+      yield
     }
-
-    export function decrypt(encrypted: string, key: string): string {
-      let decrypted = ''
-      for (let i = 0; i < encrypted.length; i++) {
-        decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length))
-      }
-      return decrypted
-    }
-
-    function mod_exp(base: number, exp: number, mod: number): number {
-      let result = 1
-      base = base % mod
-      while (exp > 0) {
-        if (exp % 2 === 1) {
-          result = (result * base) % mod
-        }
-        exp = Math.floor(exp / 2)
-        base = (base * base) % mod
-      }
-      return result
-    }
-
-    function HEX(num: number): string {
-      return num.toString(16).toUpperCase()
-    }
-    function NUM(hex: string): number {
-      return parseInt(hex, 16)
-    }
+    return result
   }
 
-  export class Connection {
-    private readonly _from: string
-    private readonly _to: string
-    private readonly _enc: string | false
-
-    get from() {
-      return this._from
-    }
-
-    get to() {
-      return this._to
-    }
-
-    constructor(from: string, to: string, encryption: string | false) {
-      this._from = from
-      this._to = to
-      this._enc = encryption
-    }
-
-    send(channel: string, ...args: any[]): void {
-      const data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._enc) : args
-      emit('send', `${this._to}:${channel}`, [this._from, data])
-    }
-
-    invoke(channel: string, ...args: any[]): Promise<any> {
-      const data = this._enc !== false ? ENCRYPTION.encrypt(JSON.stringify(args), this._enc) : args
-      emit('invoke', `${this._to}:${channel}`, [this._from, data])
-      return new Promise(resolve => {
-        const listener = listen('handle', `${this._from}:${channel}`, args => {
-          const data = this._enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, this._enc)) : args[1]
-          resolve(data)
-          system.afterEvents.scriptEventReceive.unsubscribe(listener)
-        })
-      })
-    }
+  export function make_secret(mod: number = CRYPTO.MOD): number {
+    return Math.floor(Math.random() * (mod - 1)) + 1
   }
 
-  export class ConnectionManager {
-    private readonly _id: string
-    private readonly _enc_map: Map<string, string | false>
-    private readonly _enc_force: boolean
-
-    get id() {
-      return this._id
-    }
-
-    constructor(id: string, force_encryption: boolean = false) {
-      this._id = id
-      this._enc_map = new Map<string, string | false>()
-      this._enc_force = force_encryption
-      listen('handshake', `${this._id}:SYN`, args => {
-        const secret = ENCRYPTION.generate_secret(args[4])
-        const public_key = ENCRYPTION.generate_public(secret, args[4], args[3])
-        const enc = args[1] === 1 || this._enc_force ? ENCRYPTION.generate_shared(secret, args[2], args[3]) : false
-        this._enc_map.set(args[0], enc)
-        emit('handshake', `${args[0]}:ACK`, [this._id, this._enc_force ? 1 : 0, public_key])
-      })
-    }
-
-    connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
-      const secret = ENCRYPTION.generate_secret()
-      const public_key = ENCRYPTION.generate_public(secret)
-      const enc_flag = encrypted ? 1 : 0
-      emit('handshake', `${to}:SYN`, [this._id, enc_flag, public_key, CONFIG.ENCRYPTION.PRIME, CONFIG.ENCRYPTION.MOD])
-      return new Promise((resolve, reject) => {
-        function clear() {
-          system.afterEvents.scriptEventReceive.unsubscribe(listener)
-          system.clearRun(timeout_handle)
-        }
-        const timeout_handle = system.runTimeout(() => {
-          reject()
-          clear()
-        }, timeout)
-        const listener = listen('handshake', `${this._id}:ACK`, args => {
-          if (args[0] === to) {
-            const enc = args[1] === 1 || encrypted ? ENCRYPTION.generate_shared(secret, args[2]) : false
-            resolve(new Connection(this._id, to, enc))
-            clear()
-          }
-        })
-      })
-    }
-
-    handle(channel: string, listener: (...args: any[]) => any) {
-      listen('invoke', `${this._id}:${channel}`, args => {
-        const enc = this._enc_map.get(args[0]) as string | false
-        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
-        const result = listener(...data)
-        const return_data = enc !== false ? ENCRYPTION.encrypt(JSON.stringify(result), enc) : result
-        emit('handle', `${args[0]}:${channel}`, [this._id, return_data])
-      })
-    }
-
-    on(channel: string, listener: (...args: any[]) => void) {
-      listen('send', `${this._id}:${channel}`, args => {
-        const enc = this._enc_map.get(args[0]) as string | false
-        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
-        listener(...data)
-      })
-    }
-
-    once(channel: string, listener: (...args: any[]) => void) {
-      const event = listen('send', `${this._id}:${channel}`, args => {
-        const enc = this._enc_map.get(args[0]) as string | false
-        const data: any[] = enc !== false ? JSON.parse(ENCRYPTION.decrypt(args[1] as string, enc)) : args[1]
-        listener(...data)
-        system.afterEvents.scriptEventReceive.unsubscribe(event)
-      })
-    }
+  export function* make_public(
+    secret: number,
+    mod: number = CRYPTO.MOD,
+    prime: number = CRYPTO.PRIME
+  ): Generator<void, string, void> {
+    return to_HEX(yield* mod_exp(mod, secret, prime))
   }
+
+  export function* make_shared(
+    secret: number,
+    other: string,
+    prime: number = CRYPTO.PRIME
+  ): Generator<void, string, void> {
+    return to_HEX(yield* mod_exp(to_NUM(other), secret, prime))
+  }
+
+  export function* encrypt(raw: string, key: string): Generator<void, string, void> {
+    let encrypted = ''
+    for (let i = 0; i < raw.length; i++) {
+      encrypted += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+      yield
+    }
+    return encrypted
+  }
+
+  export function* decrypt(encrypted: string, key: string): Generator<void, string, void> {
+    let decrypted = ''
+    for (let i = 0; i < encrypted.length; i++) {
+      decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+      yield
+    }
+    return decrypted
+  }
+}
+
+namespace NET {
+  export const FRAG_MAX: number = 2048
 
   interface Payload {
     channel: string
-    id: number
+    id: string
     data: string
     index?: number
     final?: boolean
@@ -231,9 +97,9 @@ namespace IPC {
 
   namespace Payload {
     export type Packed =
-      | [string, number, string]
-      | [string, number, string, number]
-      | [string, number, string, number, number]
+      | [string, string, string]
+      | [string, string, string, number]
+      | [string, string, string, number, number]
     export function toString(p: Payload): string {
       return JSON.stringify(toPacked(p))
     }
@@ -258,9 +124,20 @@ namespace IPC {
     }
   }
 
-  function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
-    const buffer = new Map<number, { size: number; payloads: Payload[] }>()
-    return system.afterEvents.scriptEventReceive.subscribe(
+  const LUT: string[] = Array.from<string, string>({ length: 256 }, (_v, i) => {
+    return (i < 16 ? '0' : '') + i.toString(16).toUpperCase()
+  })
+
+  function generate_id(): string {
+    const r = (Math.random() * 0x100000000) >>> 0
+
+    return [LUT[r & 0xff], LUT[(r >> 8) & 0xff], LUT[(r >> 16) & 0xff], LUT[(r >> 24) & 0xff]].join('')
+  }
+
+  export function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
+    const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
+    const jobs = new Array<number>()
+    const event_listener = system.afterEvents.scriptEventReceive.subscribe(
       event => {
         if (event.id === `ipc:${event_id}` && event.sourceType === ScriptEventSource.Server) {
           const p: Payload.Packed = JSON.parse(decodeURI(event.message))
@@ -268,15 +145,25 @@ namespace IPC {
             const payload: Payload = Payload.fromPacked(p)
             const fragment = buffer.has(payload.id)
               ? buffer.get(payload.id)
-              : buffer.set(payload.id, { size: -1, payloads: [] }).get(payload.id)
+              : buffer.set(payload.id, { size: -1, data_strs: [], data_size: 0 }).get(payload.id)
             if (fragment !== undefined) {
               fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
-              fragment.payloads[payload.index ?? 0] = payload
+              fragment.data_strs[payload.index ?? 0] = payload.data
+              fragment.data_size += (payload.index ?? 0) + 1
               if (fragment.size !== -1) {
-                if (fragment.payloads.filter(p => p !== null).length === fragment.size) {
-                  const full_str = fragment.payloads.map(contents => contents.data).join('')
-                  callback(JSON.parse(full_str))
-                  buffer.delete(payload.id)
+                if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
+                  const job = system.runJob(
+                    (function* () {
+                      let full_str = ''
+                      for (const str of fragment.data_strs) {
+                        full_str += str
+                        yield
+                      }
+                      callback(JSON.parse(full_str))
+                      buffer.delete(payload.id)
+                    })()
+                  )
+                  jobs.push(job)
                 }
               }
             }
@@ -285,94 +172,405 @@ namespace IPC {
       },
       { namespaces: ['ipc'] }
     )
+    return () => {
+      system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
+      for (const job of jobs) {
+        system.clearJob(job)
+      }
+      jobs.length = 0
+    }
   }
 
-  function emit(event_id: string, channel: string, args: any[]) {
-    const CMD = (payload: Payload) => `scriptevent ipc:${event_id} ${encodeURI(Payload.toString(payload))}`
-    const cmd = CMD({ channel: channel, id: ID, data: '' })
+  export function* emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
+    const ID = generate_id()
+
+    const MSG = (payload: Payload) => encodeURI(Payload.toString(payload))
+    const RUN = (msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${msg}`)
+    const msg = MSG({ channel: channel, id: ID, data: '' })
+
     const args_str = JSON.stringify(args)
-    const chars = Array.from(args_str)
-    const enc_chars = (function (chars: string[]) {
-      let r: string[] = []
+
+    const chars = new Array<string>()
+    for (const char of args_str) {
+      chars.push(char)
+      yield
+    }
+
+    const enc_chars = new Array<string>()
+    {
       let acc: string = ''
-      chars.forEach(c => {
-        if (c === '\\' && acc.length === 0) {
-          acc += c
+      for (const char of JSON.stringify(args_str)) {
+        if (char === '\\' && acc.length === 0) {
+          acc += char
         } else {
-          r.push(encodeURI(acc + c))
+          enc_chars.push(encodeURI(acc + char))
           acc = ''
         }
-      })
-      return r
-    })(Array.from(JSON.stringify(args_str)))
+        yield
+      }
+    }
 
-    const payloads: Payload[] = []
+    let len = 0
     let str = ''
     let enc_str_len = 0
     for (let i = 0; i < chars.length; i++) {
       const enc_char = enc_chars[i + 1]
-      const cmd_len = enc_str_len + enc_char.length + cmd.length + `,${payloads.length},1`.length
-      if (cmd_len < CONFIG.FRAGMENTATION.MAX_CMD_LENGTH) {
+      const msg_len = enc_str_len + enc_char.length + msg.length + `,${len},1`.length
+      if (msg_len < NET.FRAG_MAX) {
         str += chars[i]
         enc_str_len += enc_char.length
       } else {
-        payloads.push({ channel: channel, id: ID, data: str, index: payloads.length })
+        RUN(MSG({ channel: channel, id: ID, data: str, index: len }))
+        len++
         str = chars[i]
         enc_str_len = enc_char.length
       }
+      yield
     }
 
-    if (payloads.length === 0) {
-      payloads.push({ channel: channel, id: ID, data: str })
-    } else {
-      payloads.push({ channel: channel, id: ID, data: str, index: payloads.length, final: true })
-    }
-
-    system.runJob(
-      (function* () {
-        for (const payload of payloads) {
-          world.getDimension('overworld').runCommand(CMD(payload))
-          yield
-        }
-      })()
+    RUN(
+      MSG(
+        len === 0
+          ? { channel: channel, id: ID, data: str }
+          : { channel: channel, id: ID, data: str, index: len, final: true }
+      )
     )
-    ID++
   }
+}
 
-  /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke(channel: string, ...args: any[]): Promise<any> {
-    emit('invoke', channel, args)
-    return new Promise(resolve => {
-      const listener = listen('handle', channel, args => {
-        resolve(args[0])
-        system.afterEvents.scriptEventReceive.unsubscribe(listener)
+namespace IPC {
+  export class Connection {
+    private readonly _from: string
+    private readonly _to: string
+    private readonly _enc: string | false
+    private readonly _terminators: Array<() => void>
+
+    private *MAYBE_ENCRYPT(args: any[]): Generator<void, any, void> {
+      return this._enc !== false ? yield* CRYPTO.encrypt(JSON.stringify(args), this._enc) : args
+    }
+    private *MAYBE_DECRYPT(args: any[]): Generator<void, any, void> {
+      return this._enc !== false ? JSON.parse(yield* CRYPTO.decrypt(args[1] as string, this._enc)) : args[1]
+    }
+
+    get from() {
+      return this._from
+    }
+
+    get to() {
+      return this._to
+    }
+
+    constructor(from: string, to: string, encryption: string | false) {
+      this._from = from
+      this._to = to
+      this._enc = encryption
+      this._terminators = new Array<() => void>()
+    }
+
+    terminate(notify: boolean = true) {
+      const $ = this
+      $._terminators.forEach(terminate => terminate())
+      $._terminators.length = 0
+      if (notify) {
+        system.runJob(NET.emit('terminate', $._to, [$._from]))
+      }
+    }
+
+    send(channel: string, ...args: any[]): void {
+      const $ = this
+      system.runJob(
+        (function* () {
+          const data = yield* $.MAYBE_ENCRYPT(args)
+          yield* NET.emit('send', `${$._to}:${channel}`, [$._from, data])
+        })()
+      )
+    }
+
+    invoke(channel: string, ...args: any[]): Promise<any> {
+      const $ = this
+      system.runJob(
+        (function* () {
+          const data = yield* $.MAYBE_ENCRYPT(args)
+          yield* NET.emit('invoke', `${$._to}:${channel}`, [$._from, data])
+        })()
+      )
+
+      return new Promise(resolve => {
+        const terminate = NET.listen('handle', `${$._from}:${channel}`, args => {
+          if (args[0] === $._to) {
+            system.runJob(
+              (function* () {
+                const data = yield* $.MAYBE_DECRYPT(args)
+                resolve(data)
+              })()
+            )
+            terminate()
+          }
+        })
       })
-    })
+    }
+
+    on(channel: string, listener: (...args: any[]) => void) {
+      const $ = this
+      const terminate = NET.listen('send', `${$._from}:${channel}`, args => {
+        if (args[0] === $._to) {
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args)
+              listener(...data)
+            })()
+          )
+        }
+      })
+      $._terminators.push(terminate)
+      return terminate
+    }
+
+    once(channel: string, listener: (...args: any[]) => void) {
+      const $ = this
+      const terminate = NET.listen('send', `${$._from}:${channel}`, args => {
+        if (args[0] === $._to) {
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args)
+              listener(...data)
+            })()
+          )
+          terminate()
+        }
+      })
+      $._terminators.push(terminate)
+      return terminate
+    }
+
+    handle(channel: string, listener: (...args: any[]) => any) {
+      const $ = this
+      const terminate = NET.listen('invoke', `${$._from}:${channel}`, args => {
+        if (args[0] === $._to) {
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args)
+              const result = listener(...data)
+              const return_data = yield* $.MAYBE_ENCRYPT(result)
+              yield* NET.emit('handle', `${$._to}:${channel}`, [$._from, return_data])
+            })()
+          )
+        }
+      })
+      $._terminators.push(terminate)
+      return terminate
+    }
   }
 
-  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle(channel: string, listener: (...args: any[]) => any) {
-    listen('invoke', channel, args => {
-      const result = listener(...args)
-      emit('handle', channel, [result])
-    })
+  export class ConnectionManager {
+    private readonly _id: string
+    private readonly _enc_map: Map<string, string | false>
+    private readonly _con_map: Map<string, Connection>
+    private readonly _enc_force: boolean
+
+    private *MAYBE_ENCRYPT(args: any[], encryption: string | false): Generator<void, any, void> {
+      return encryption !== false ? yield* CRYPTO.encrypt(JSON.stringify(args), encryption) : args
+    }
+    private *MAYBE_DECRYPT(args: any[], encryption: string | false): Generator<void, any, void> {
+      return encryption !== false ? JSON.parse(yield* CRYPTO.decrypt(args[1] as string, encryption)) : args[1]
+    }
+
+    get id() {
+      return this._id
+    }
+
+    constructor(id: string, force_encryption: boolean = false) {
+      const $ = this
+      this._id = id
+      this._enc_map = new Map<string, string | false>()
+      this._con_map = new Map<string, Connection>()
+      this._enc_force = force_encryption
+      NET.listen('handshake', `${this._id}:SYN`, args => {
+        system.runJob(
+          (function* () {
+            const secret = CRYPTO.make_secret(args[4])
+            const public_key = yield* CRYPTO.make_public(secret, args[4], args[3])
+            const enc = args[1] === 1 || $._enc_force ? yield* CRYPTO.make_shared(secret, args[2], args[3]) : false
+            $._enc_map.set(args[0], enc)
+            yield* NET.emit('handshake', `${args[0]}:ACK`, [$._id, $._enc_force ? 1 : 0, public_key])
+          })()
+        )
+      })
+
+      NET.listen('terminate', this._id, args => {
+        this._enc_map.delete(args[0])
+      })
+    }
+
+    connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
+      const $ = this
+      return new Promise((resolve, reject) => {
+        const con = this._con_map.get(to)
+        if (con !== undefined) {
+          con.terminate(false)
+          resolve(con)
+        } else {
+          const secret = CRYPTO.make_secret()
+          const enc_flag = encrypted ? 1 : 0
+          system.runJob(
+            (function* () {
+              const public_key = yield* CRYPTO.make_public(secret)
+              yield* NET.emit('handshake', `${to}:SYN`, [$._id, enc_flag, public_key, CRYPTO.PRIME, CRYPTO.MOD])
+            })()
+          )
+          function clear() {
+            terminate()
+            system.clearRun(timeout_handle)
+          }
+          const timeout_handle = system.runTimeout(() => {
+            reject()
+            clear()
+          }, timeout)
+          const terminate = NET.listen('handshake', `${this._id}:ACK`, args => {
+            if (args[0] === to) {
+              system.runJob(
+                (function* () {
+                  const enc = args[1] === 1 || encrypted ? yield* CRYPTO.make_shared(secret, args[2]) : false
+                  const new_con = new Connection($._id, to, enc)
+                  $._con_map.set(to, new_con)
+                  resolve(new_con)
+                })()
+              )
+              clear()
+            }
+          })
+        }
+      })
+    }
+
+    send(channel: string, ...args: any[]): void {
+      const $ = this
+      system.runJob(
+        (function* () {
+          for (const [key, value] of $._enc_map) {
+            const data = yield* $.MAYBE_ENCRYPT(args, value)
+            yield* NET.emit('send', `${key}:${channel}`, [$._id, data])
+          }
+        })()
+      )
+    }
+
+    invoke(channel: string, ...args: any[]): Promise<any>[] {
+      const $ = this
+      const promises: Promise<any>[] = []
+
+      for (const [key, value] of $._enc_map) {
+        system.runJob(
+          (function* () {
+            const data = yield* $.MAYBE_ENCRYPT(args, value)
+            yield* NET.emit('invoke', `${key}:${channel}`, [$._id, data])
+          })()
+        )
+
+        promises.push(
+          new Promise(resolve => {
+            const terminate = NET.listen('handle', `${$._id}:${channel}`, args => {
+              if (args[0] === key) {
+                system.runJob(
+                  (function* () {
+                    const data = yield* $.MAYBE_DECRYPT(args, value)
+                    resolve(data)
+                  })()
+                )
+                terminate()
+              }
+            })
+          })
+        )
+      }
+      return promises
+    }
+
+    on(channel: string, listener: (...args: any[]) => void) {
+      const $ = this
+      return NET.listen('send', `${$._id}:${channel}`, args => {
+        const enc = this._enc_map.get(args[0]) as string | false
+        if (enc !== undefined) {
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args, enc)
+              listener(...data)
+            })()
+          )
+        }
+      })
+    }
+
+    once(channel: string, listener: (...args: any[]) => void) {
+      const $ = this
+      const terminate = NET.listen('send', `${$._id}:${channel}`, args => {
+        const enc = this._enc_map.get(args[0]) as string | false
+        if (enc !== undefined) {
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args, enc)
+              listener(...data)
+            })()
+          )
+          terminate()
+        }
+      })
+      return terminate
+    }
+
+    handle(channel: string, listener: (...args: any[]) => any) {
+      const $ = this
+      return NET.listen('invoke', `${$._id}:${channel}`, args => {
+        const enc = this._enc_map.get(args[0]) as string | false
+        if (enc !== undefined) {
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args, enc)
+              const result = listener(...data)
+              const return_data = yield* $.MAYBE_ENCRYPT(result, enc)
+              yield* NET.emit('handle', `${args[0]}:${channel}`, [$._id, return_data])
+            })()
+          )
+        }
+      })
+    }
   }
 
   /** Sends a message with `args` to `channel` */
   export function send(channel: string, ...args: any[]): void {
-    emit('send', channel, args)
+    system.runJob(NET.emit('send', channel, args))
+  }
+
+  /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
+  export function invoke(channel: string, ...args: any[]): Promise<any> {
+    system.runJob(NET.emit('invoke', channel, args))
+    return new Promise(resolve => {
+      const terminate = NET.listen('handle', channel, args => {
+        resolve(args[0])
+        terminate()
+      })
+    })
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on(channel: string, listener: (...args: any[]) => void) {
-    listen('send', channel, args => listener(...args))
+    return NET.listen('send', channel, args => listener(...args))
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
   export function once(channel: string, listener: (...args: any[]) => void) {
-    const event = listen('send', channel, args => {
+    const terminate = NET.listen('send', channel, args => {
       listener(...args)
-      system.afterEvents.scriptEventReceive.unsubscribe(event)
+      terminate()
+    })
+    return terminate
+  }
+
+  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
+  export function handle(channel: string, listener: (...args: any[]) => any) {
+    return NET.listen('invoke', channel, args => {
+      const result = listener(...args)
+      system.runJob(NET.emit('handle', channel, [result]))
     })
   }
 }
