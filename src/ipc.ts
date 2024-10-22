@@ -318,24 +318,6 @@ namespace IPC {
       })
     }
 
-    handle(channel: string, listener: (...args: any[]) => any) {
-      const $ = this
-      const terminate = NET.listen('invoke', `${$._from}:${channel}`, args => {
-        if (args[0] === $._to) {
-          system.runJob(
-            (function* () {
-              const data = yield* $.MAYBE_DECRYPT(args)
-              const result = listener(...data)
-              const return_data = yield* $.MAYBE_ENCRYPT(result)
-              yield* NET.emit('handle', `${$._to}:${channel}`, [$._from, return_data])
-            })()
-          )
-        }
-      })
-      $._terminators.push(terminate)
-      return terminate
-    }
-
     on(channel: string, listener: (...args: any[]) => void) {
       const $ = this
       const terminate = NET.listen('send', `${$._from}:${channel}`, args => {
@@ -368,6 +350,24 @@ namespace IPC {
       $._terminators.push(terminate)
       return terminate
     }
+
+    handle(channel: string, listener: (...args: any[]) => any) {
+      const $ = this
+      const terminate = NET.listen('invoke', `${$._from}:${channel}`, args => {
+        if (args[0] === $._to) {
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args)
+              const result = listener(...data)
+              const return_data = yield* $.MAYBE_ENCRYPT(result)
+              yield* NET.emit('handle', `${$._to}:${channel}`, [$._from, return_data])
+            })()
+          )
+        }
+      })
+      $._terminators.push(terminate)
+      return terminate
+    }
   }
 
   export class ConnectionManager {
@@ -376,32 +376,11 @@ namespace IPC {
     private readonly _con_map: Map<string, Connection>
     private readonly _enc_force: boolean
 
-    private ARGS(data: any) {
-      return [this._id, data]
-    }
-    private CHANNEL(channel: string, id: string = this._id) {
-      return `${id}:${channel}`
-    }
-
     private *MAYBE_ENCRYPT(args: any[], encryption: string | false): Generator<void, any, void> {
-      if (encryption !== false) {
-        return yield* CRYPTO.encrypt(JSON.stringify(args), encryption)
-      } else {
-        return args
-      }
+      return encryption !== false ? yield* CRYPTO.encrypt(JSON.stringify(args), encryption) : args
     }
     private *MAYBE_DECRYPT(args: any[], encryption: string | false): Generator<void, any, void> {
-      if (encryption !== false) {
-        return JSON.parse(yield* CRYPTO.decrypt(args[1] as string, encryption))
-      } else {
-        return args[1]
-      }
-    }
-    private GUARD(in_args: any, success: (encryption: string | false) => void) {
-      const enc = this._enc_map.get(in_args[0]) as string | false
-      if (enc !== undefined) {
-        success(enc)
-      }
+      return encryption !== false ? JSON.parse(yield* CRYPTO.decrypt(args[1] as string, encryption)) : args[1]
     }
 
     get id() {
@@ -472,59 +451,13 @@ namespace IPC {
       })
     }
 
-    handle(channel: string, listener: (...args: any[]) => any) {
-      const $ = this
-      return NET.listen('invoke', this.CHANNEL(channel), args => {
-        this.GUARD(args, enc => {
-          system.runJob(
-            (function* () {
-              const data = yield* $.MAYBE_DECRYPT(args, enc)
-              const result = listener(...data)
-              const return_data = yield* $.MAYBE_ENCRYPT(result, enc)
-              yield* NET.emit('handle', $.CHANNEL(channel, args[0]), $.ARGS(return_data))
-            })()
-          )
-        })
-      })
-    }
-
-    on(channel: string, listener: (...args: any[]) => void) {
-      const $ = this
-      return NET.listen('send', this.CHANNEL(channel), args => {
-        this.GUARD(args, enc => {
-          system.runJob(
-            (function* () {
-              const data = yield* $.MAYBE_DECRYPT(args, enc)
-              listener(...data)
-            })()
-          )
-        })
-      })
-    }
-
-    once(channel: string, listener: (...args: any[]) => void) {
-      const $ = this
-      const terminate = NET.listen('send', this.CHANNEL(channel), args => {
-        this.GUARD(args, enc => {
-          system.runJob(
-            (function* () {
-              const data = yield* $.MAYBE_DECRYPT(args, enc)
-              listener(...data)
-            })()
-          )
-          terminate()
-        })
-      })
-      return terminate
-    }
-
     send(channel: string, ...args: any[]): void {
       const $ = this
       system.runJob(
         (function* () {
           for (const [key, value] of $._enc_map) {
             const data = yield* $.MAYBE_ENCRYPT(args, value)
-            yield* NET.emit('send', $.CHANNEL(channel, key), $.ARGS(data))
+            yield* NET.emit('send', `${key}:${channel}`, [$._id, data])
           }
         })()
       )
@@ -538,13 +471,13 @@ namespace IPC {
         system.runJob(
           (function* () {
             const data = yield* $.MAYBE_ENCRYPT(args, value)
-            yield* NET.emit('invoke', $.CHANNEL(channel, key), $.ARGS(data))
+            yield* NET.emit('invoke', `${key}:${channel}`, [$._id, data])
           })()
         )
 
         promises.push(
           new Promise(resolve => {
-            const terminate = NET.listen('handle', this.CHANNEL(channel), args => {
+            const terminate = NET.listen('handle', `${$._id}:${channel}`, args => {
               if (args[0] === key) {
                 system.runJob(
                   (function* () {
@@ -559,6 +492,55 @@ namespace IPC {
         )
       }
       return promises
+    }
+
+    on(channel: string, listener: (...args: any[]) => void) {
+      const $ = this
+      return NET.listen('send', `${$._id}:${channel}`, args => {
+        const enc = this._enc_map.get(args[0]) as string | false
+        if (enc !== undefined) {
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args, enc)
+              listener(...data)
+            })()
+          )
+        }
+      })
+    }
+
+    once(channel: string, listener: (...args: any[]) => void) {
+      const $ = this
+      const terminate = NET.listen('send', `${$._id}:${channel}`, args => {
+        const enc = this._enc_map.get(args[0]) as string | false
+        if (enc !== undefined) {
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args, enc)
+              listener(...data)
+            })()
+          )
+          terminate()
+        }
+      })
+      return terminate
+    }
+
+    handle(channel: string, listener: (...args: any[]) => any) {
+      const $ = this
+      return NET.listen('invoke', `${$._id}:${channel}`, args => {
+        const enc = this._enc_map.get(args[0]) as string | false
+        if (enc !== undefined) {
+          system.runJob(
+            (function* () {
+              const data = yield* $.MAYBE_DECRYPT(args, enc)
+              const result = listener(...data)
+              const return_data = yield* $.MAYBE_ENCRYPT(result, enc)
+              yield* NET.emit('handle', `${args[0]}:${channel}`, [$._id, return_data])
+            })()
+          )
+        }
+      })
     }
   }
 
@@ -578,14 +560,6 @@ namespace IPC {
     })
   }
 
-  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle(channel: string, listener: (...args: any[]) => any) {
-    return NET.listen('invoke', channel, args => {
-      const result = listener(...args)
-      system.runJob(NET.emit('handle', channel, [result]))
-    })
-  }
-
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on(channel: string, listener: (...args: any[]) => void) {
     return NET.listen('send', channel, args => listener(...args))
@@ -598,6 +572,14 @@ namespace IPC {
       terminate()
     })
     return terminate
+  }
+
+  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
+  export function handle(channel: string, listener: (...args: any[]) => any) {
+    return NET.listen('invoke', channel, args => {
+      const result = listener(...args)
+      system.runJob(NET.emit('handle', channel, [result]))
+    })
   }
 }
 
