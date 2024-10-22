@@ -246,18 +246,10 @@ namespace IPC {
     private readonly _terminators: Array<() => void>
 
     private *MAYBE_ENCRYPT(args: any[]): Generator<void, any, void> {
-      if (this._enc !== false) {
-        return yield* CRYPTO.encrypt(JSON.stringify(args), this._enc)
-      } else {
-        return args
-      }
+      return this._enc !== false ? yield* CRYPTO.encrypt(JSON.stringify(args), this._enc) : args
     }
     private *MAYBE_DECRYPT(args: any[]): Generator<void, any, void> {
-      if (this._enc !== false) {
-        return JSON.parse(yield* CRYPTO.decrypt(args[1] as string, this._enc))
-      } else {
-        return args[1]
-      }
+      return this._enc !== false ? JSON.parse(yield* CRYPTO.decrypt(args[1] as string, this._enc)) : args[1]
     }
 
     get from() {
