@@ -188,6 +188,43 @@ namespace NET {
     }
   }
 
+  interface SERDE_Payload {
+    event: string
+    channel: string
+    id: string
+    index?: number
+    final?: boolean
+  }
+
+  namespace SERDE_Payload {
+    export type Packed =
+      | [string, string, string]
+      | [string, string, string, number]
+      | [string, string, string, number, number]
+    export function toString(p: SERDE_Payload): string {
+      return JSON.stringify(toPacked(p))
+    }
+    export function fromString(s: string): SERDE_Payload {
+      return fromPacked(JSON.parse(s) as Packed)
+    }
+
+    export function toPacked(p: SERDE_Payload): Packed {
+      return p.index !== undefined
+        ? p.final !== undefined
+          ? [p.event, p.channel, p.id, p.index, p.final ? 1 : 0]
+          : [p.event, p.channel, p.id, p.index]
+        : [p.event, p.channel, p.id]
+    }
+
+    export function fromPacked(p: Packed): SERDE_Payload {
+      return p[3] !== undefined
+        ? p[4] !== undefined
+          ? { event: p[0], channel: p[1], id: p[2], index: p[3], final: p[4] === 1 }
+          : { event: p[0], channel: p[1], id: p[2], index: p[3] }
+        : { event: p[0], channel: p[1], id: p[2] }
+    }
+  }
+
   const LUT: string[] = Array.from<string, string>({ length: 256 }, (_v, i) => {
     return (i < 16 ? '0' : '') + i.toString(16).toUpperCase()
   })
@@ -304,11 +341,9 @@ namespace NET {
   export function* serde_emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
     const ID = generate_id()
 
-    const ser_id = yield* SERDE.encode([event_id, channel, ID /** index */ /** final */, ,].toString())
-
-    const MSG = (payload: Payload) => encodeURI(Payload.toString(payload))
-    const RUN = (msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${msg}`)
-    const msg = MSG({ channel: channel, id: ID, data: '' })
+    const MSG = (data: string) => SERDE.encode(data)
+    const E_ID = (payload: SERDE_Payload) => SERDE.encode(SERDE_Payload.toString(payload))
+    const RUN = (id: string, msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${id} ${msg}`)
 
     const args_str = JSON.stringify(args)
 
@@ -337,12 +372,12 @@ namespace NET {
     let enc_str_len = 0
     for (let i = 0; i < chars.length; i++) {
       const enc_char = enc_chars[i + 1]
-      const msg_len = enc_str_len + enc_char.length + msg.length + `,${len},1`.length
+      const msg_len = enc_str_len + enc_char.length
       if (msg_len < NET.FRAG_MAX) {
         str += chars[i]
         enc_str_len += enc_char.length
       } else {
-        RUN(MSG({ channel: channel, id: ID, data: str, index: len }))
+        RUN(yield* E_ID({ event: event_id, channel: channel, id: ID, index: len }), yield* MSG(str))
         len++
         str = chars[i]
         enc_str_len = enc_char.length
@@ -351,11 +386,12 @@ namespace NET {
     }
 
     RUN(
-      MSG(
+      yield* E_ID(
         len === 0
-          ? { channel: channel, id: ID, data: str }
-          : { channel: channel, id: ID, data: str, index: len, final: true }
-      )
+          ? { event: event_id, channel: channel, id: ID }
+          : { event: event_id, channel: channel, id: ID, index: len, final: true }
+      ),
+      yield* MSG(str)
     )
   }
 }
