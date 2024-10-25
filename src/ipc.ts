@@ -24,6 +24,47 @@
 
 import { world, system, ScriptEventSource } from '@minecraft/server'
 
+namespace SERDE {
+  const valid_chars = '()-.ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz'
+  const sequence_regex = /\?{2}[0-9a-fA-F]{4}|\?[0-9a-fA-F]{2}|[^?]+/g
+  const UTF8_regex = /^\?[0-9a-fA-F]{2}$/
+  const UTF16_regex = /^\?{2}[0-9a-fA-F]{4}$/
+
+  export function* encode(str: string): Generator<void, string, void> {
+    const result = new Array<string>()
+    for (const char of str) {
+      if (valid_chars.includes(char)) {
+        result.push(char)
+      } else {
+        let code = char.charCodeAt(0)
+        if (code >= 0xd800 && code <= 0xdbff) {
+          let lo = str.charCodeAt(str.indexOf(char) + 1)
+          result.push(`??${code.toString(16).padStart(4, '0')}??${lo.toString(16).padStart(4, '0')}`)
+        } else {
+          result.push(`?${code.toString(16).padStart(2, '0')}`)
+        }
+      }
+      yield
+    }
+    return result.join('')
+  }
+
+  export function* decode(str: string): Generator<void, string, void> {
+    const result = new Array<string>()
+    for (const sequence of str.match(sequence_regex) ?? []) {
+      if (sequence.startsWith('??') && UTF16_regex.test(sequence)) {
+        result.push(String.fromCharCode(parseInt(sequence.slice(2), 16)))
+      } else if (sequence.startsWith('?') && UTF8_regex.test(sequence))
+        result.push(String.fromCharCode(parseInt(sequence.slice(1), 16)))
+      else {
+        result.push(sequence)
+      }
+      yield
+    }
+    return result.join('')
+  }
+}
+
 namespace CRYPTO {
   export const PRIME: number = 19893121
   export const MOD: number = 341
