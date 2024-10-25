@@ -53,11 +53,11 @@ namespace SERDE {
     return String.fromCharCode(code)
   }
 
-  export function* encode(str: string): Generator<void, string, void> {
+  export function* encode(str: string, ignored: string = valid_chars): Generator<void, string, void> {
     const result = new Array<string>()
     for (let i = 0; i < str.length; i++) {
       const char = str.charAt(i)
-      if (valid_chars.includes(char)) {
+      if (ignored.includes(char)) {
         result.push(char)
       } else {
         let code = char.charCodeAt(0)
@@ -148,7 +148,7 @@ namespace CRYPTO {
   }
 }
 
-namespace NET {
+export namespace NET {
   export const FRAG_MAX: number = 2048
 
   interface Payload {
@@ -304,7 +304,7 @@ namespace NET {
         if (char === '\\' && acc.length === 0) {
           acc += char
         } else {
-          enc_chars.push(encodeURI(acc + char))
+          enc_chars.push(yield* SERDE.encode(acc + char))
           acc = ''
         }
         yield
