@@ -394,6 +394,52 @@ namespace NET {
       yield* MSG(str)
     )
   }
+
+  export function serde_listen(event_id: string, channel: string, callback: (args: any[]) => void) {
+    const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
+    const jobs = new Array<number>()
+    const event_listener = system.afterEvents.scriptEventReceive.subscribe(
+      event => {
+        if (event.id.startsWith(`ipc:`) && event.sourceType === ScriptEventSource.Server) {
+          const job = system.runJob(function*(){
+            const payload = SERDE_Payload.fromString(yield* SERDE.decode(event.id.slice(4)))
+            if (payload.event === event_id && payload.channel === channel) {
+              const data = yield* SERDE.decode(event.message)
+
+              const fragment = buffer.has(payload.id)
+              ? buffer.get(payload.id)
+              : buffer.set(payload.id, { size: -1, data_strs: [], data_size: 0 }).get(payload.id)
+              if (fragment !== undefined) {
+                fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
+                fragment.data_strs[payload.index ?? 0] = data
+                fragment.data_size += (payload.index ?? 0) + 1
+                if (fragment.size !== -1) {
+                  if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
+                    let full_str = ''
+                    for (const str of fragment.data_strs) {
+                      full_str += str
+                      yield
+                    }
+                    callback(JSON.parse(full_str))
+                    buffer.delete(payload.id)
+                  }
+                }
+              }
+            }
+          }())
+          jobs.push(job)
+        }
+      },
+      { namespaces: ['ipc'] }
+    )
+    return () => {
+      system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
+      for (const job of jobs) {
+        system.clearJob(job)
+      }
+      jobs.length = 0
+    }
+  }
 }
 
 namespace IPC {
