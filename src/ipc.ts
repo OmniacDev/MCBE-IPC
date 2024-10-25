@@ -26,22 +26,45 @@ import { world, system, ScriptEventSource } from '@minecraft/server'
 
 namespace SERDE {
   const valid_chars = '()-.ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz'
-  const sequence_regex = /\?{2}[0-9a-fA-F]{4}|\?[0-9a-fA-F]{2}|[^?]+/g
-  const UTF8_regex = /^\?[0-9a-fA-F]{2}$/
-  const UTF16_regex = /^\?{2}[0-9a-fA-F]{4}$/
+  const sequence_regex = /\?{2}[0-9a-zA-Z\.\-]{3}|\?{1}[0-9a-zA-Z\.\-]{2}|[^?]+/g
+  const UTF8_regex = /^\?{1}[0-9a-zA-Z\.\-]{2}$/
+  const UTF16_regex = /^\?{2}[0-9a-zA-Z\.\-]{3}$/
+
+  const BASE64 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-'
+
+  export function* b64_encode(char: string) {
+    let code = char.charCodeAt(0)
+    let encoded = ''
+
+    while (code > 0) {
+      encoded = BASE64[code % 64] + encoded
+      code = Math.floor(code / 64)
+      yield
+    }
+    return encoded
+  }
+
+  export function* b64_decode(enc: string) {
+    let code = 0
+    for (let i = 0; i < enc.length; i++) {
+      code += 64 ** (enc.length - 1 - i) * BASE64.indexOf(enc[i])
+      yield
+    }
+    return String.fromCharCode(code)
+  }
 
   export function* encode(str: string): Generator<void, string, void> {
     const result = new Array<string>()
-    for (const char of str) {
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charAt(i)
       if (valid_chars.includes(char)) {
         result.push(char)
       } else {
         let code = char.charCodeAt(0)
-        if (code >= 0xd800 && code <= 0xdbff) {
-          let lo = str.charCodeAt(str.indexOf(char) + 1)
-          result.push(`??${code.toString(16).padStart(4, '0')}??${lo.toString(16).padStart(4, '0')}`)
+        if (code >= 0xd800) {
+          result.push(`??${(yield* b64_encode(char)).padStart(3, '0')}`)
         } else {
-          result.push(`?${code.toString(16).padStart(2, '0')}`)
+          result.push(`?${(yield* b64_encode(char)).padStart(2, '0')}`)
         }
       }
       yield
@@ -53,9 +76,9 @@ namespace SERDE {
     const result = new Array<string>()
     for (const sequence of str.match(sequence_regex) ?? []) {
       if (sequence.startsWith('??') && UTF16_regex.test(sequence)) {
-        result.push(String.fromCharCode(parseInt(sequence.slice(2), 16)))
+        result.push(yield* b64_decode(sequence.slice(2)))
       } else if (sequence.startsWith('?') && UTF8_regex.test(sequence))
-        result.push(String.fromCharCode(parseInt(sequence.slice(1), 16)))
+        result.push(yield* b64_decode(sequence.slice(1)))
       else {
         result.push(sequence)
       }
@@ -224,6 +247,64 @@ namespace NET {
 
   export function* emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
     const ID = generate_id()
+
+    const MSG = (payload: Payload) => encodeURI(Payload.toString(payload))
+    const RUN = (msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${msg}`)
+    const msg = MSG({ channel: channel, id: ID, data: '' })
+
+    const args_str = JSON.stringify(args)
+
+    const chars = new Array<string>()
+    for (const char of args_str) {
+      chars.push(char)
+      yield
+    }
+
+    const enc_chars = new Array<string>()
+    {
+      let acc: string = ''
+      for (const char of JSON.stringify(args_str)) {
+        if (char === '\\' && acc.length === 0) {
+          acc += char
+        } else {
+          enc_chars.push(encodeURI(acc + char))
+          acc = ''
+        }
+        yield
+      }
+    }
+
+    let len = 0
+    let str = ''
+    let enc_str_len = 0
+    for (let i = 0; i < chars.length; i++) {
+      const enc_char = enc_chars[i + 1]
+      const msg_len = enc_str_len + enc_char.length + msg.length + `,${len},1`.length
+      if (msg_len < NET.FRAG_MAX) {
+        str += chars[i]
+        enc_str_len += enc_char.length
+      } else {
+        RUN(MSG({ channel: channel, id: ID, data: str, index: len }))
+        len++
+        str = chars[i]
+        enc_str_len = enc_char.length
+      }
+      yield
+    }
+
+    RUN(
+      MSG(
+        len === 0
+          ? { channel: channel, id: ID, data: str }
+          : { channel: channel, id: ID, data: str, index: len, final: true }
+      )
+    )
+  }
+
+  export function* serde_emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
+    const ID = generate_id()
+
+    const ser_id = yield* SERDE.encode([event_id, channel, ID /** index */ /** final */, ,].toString())
 
     const MSG = (payload: Payload) => encodeURI(Payload.toString(payload))
     const RUN = (msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${msg}`)
