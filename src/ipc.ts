@@ -365,10 +365,15 @@ namespace IPC {
 export default IPC
 
 namespace SERDE {
-  const valid_chars = '()-.ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz'
-  const sequence_regex = /\?{2}[0-9a-zA-Z\.\-]{3}|\?{1}[0-9a-zA-Z\.\-]{2}|[^?]+/g
+  const INVALID_START_CODES = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57]
+  const INVALID_CODES = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+    31, 32, 33, 34, 35, 36, 37, 38, 39, 42, 43, 44, 47, 58, 59, 60, 61, 62, 63, 64, 91, 92, 93, 94, 96, 123, 124, 125,
+    126, 127
+  ]
+
+  const sequence_regex = /\?{1}[0-9a-zA-Z\.\-]{2}|[^?]+/g
   const UTF8_regex = /^\?{1}[0-9a-zA-Z\.\-]{2}$/
-  const UTF16_regex = /^\?{2}[0-9a-zA-Z\.\-]{3}$/
 
   const BASE64 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-'
 
@@ -393,18 +398,15 @@ namespace SERDE {
     return String.fromCharCode(code)
   }
 
-  export function* encode(str: string, ignored: string = valid_chars): Generator<void, string, void> {
+  export function* encode(str: string): Generator<void, string, void> {
     const result = new Array<string>()
     for (let i = 0; i < str.length; i++) {
       const char = str.charAt(i)
-      if (ignored.includes(char)) {
-        result.push(char)
+      const char_code = char.charCodeAt(0)
+      if ((i === 0 && INVALID_START_CODES.includes(char_code)) || INVALID_CODES.includes(char_code)) {
+        result.push(`?${(yield* b64_encode(char)).padStart(2, '0')}`)
       } else {
-        if (char.charCodeAt(0) >= 0xd800) {
-          result.push(`??${(yield* b64_encode(char)).padStart(3, '0')}`)
-        } else {
-          result.push(`?${(yield* b64_encode(char)).padStart(2, '0')}`)
-        }
+        result.push(char)
       }
       yield
     }
@@ -414,9 +416,7 @@ namespace SERDE {
   export function* decode(str: string): Generator<void, string, void> {
     const result = new Array<string>()
     for (const seq of str.match(sequence_regex) ?? []) {
-      if (seq.startsWith('??') && UTF16_regex.test(seq)) {
-        result.push(yield* b64_decode(seq.slice(2)))
-      } else if (seq.startsWith('?') && UTF8_regex.test(seq)) result.push(yield* b64_decode(seq.slice(1)))
+      if (seq.startsWith('?') && UTF8_regex.test(seq)) result.push(yield* b64_decode(seq.slice(1)))
       else {
         result.push(seq)
       }
@@ -576,7 +576,7 @@ export namespace NET {
         if (char === '\\' && acc.length === 0) {
           acc += char
         } else {
-          enc_chars.push(encodeURI(acc + char))
+          enc_chars.push(yield* SERDE.encode(acc + char))
           acc = ''
         }
         yield
