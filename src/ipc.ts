@@ -682,7 +682,7 @@ export namespace NET {
 
     const MSG = (data: string) => SERDE.encode(data)
     const E_ID = (payload: SERDE_Payload) => SERDE.encode(SERDE_Payload.toString(payload))
-    const RUN = (id: string, msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${id} ${msg}`)
+    const RUN = (id: string, msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc_ser:${id} ${msg}`)
 
     const args_str = JSON.stringify(args)
 
@@ -739,7 +739,7 @@ export namespace NET {
     const jobs = new Array<number>()
     const event_listener = system.afterEvents.scriptEventReceive.subscribe(
       event => {
-        if (event.id.startsWith(`ipc:`) && event.sourceType === ScriptEventSource.Server) {
+        if (event.id.startsWith(`ipc_ser:`) && event.sourceType === ScriptEventSource.Server) {
           const job = system.runJob(
             (function* () {
               const payload = SERDE_Payload.fromString(yield* SERDE.decode(event.id.slice(4)))
@@ -771,7 +771,7 @@ export namespace NET {
           jobs.push(job)
         }
       },
-      { namespaces: ['ipc'] }
+      { namespaces: ['ipc_ser'] }
     )
     return () => {
       system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
