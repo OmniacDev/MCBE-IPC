@@ -416,8 +416,7 @@ namespace SERDE {
     for (const seq of str.match(sequence_regex) ?? []) {
       if (seq.startsWith('??') && UTF16_regex.test(seq)) {
         result.push(yield* b64_decode(seq.slice(2)))
-      } else if (seq.startsWith('?') && UTF8_regex.test(seq))
-        result.push(yield* b64_decode(seq.slice(1)))
+      } else if (seq.startsWith('?') && UTF8_regex.test(seq)) result.push(yield* b64_decode(seq.slice(1)))
       else {
         result.push(seq)
       }
@@ -489,6 +488,23 @@ namespace CRYPTO {
 
 export namespace NET {
   export const FRAG_MAX: number = 2048
+
+  const NAMESPACE = 'ipc_ser'
+  const listeners = new Array<(payload: SERDE_Payload, data: string) => void>()
+  const global_listener = system.afterEvents.scriptEventReceive.subscribe(
+    event => {
+      if (event.sourceType === ScriptEventSource.Server) {
+        system.runJob(
+          (function* () {
+            const payload = SERDE_Payload.fromString(yield* SERDE.decode(event.id.slice(NAMESPACE.length + 1)))
+            const data = yield* SERDE.decode(event.message)
+            listeners.forEach(listener => listener(payload, data))
+          })()
+        )
+      }
+    },
+    { namespaces: [NAMESPACE] }
+  )
 
   interface Payload {
     channel: string
@@ -682,7 +698,8 @@ export namespace NET {
 
     const MSG = (data: string) => SERDE.encode(data)
     const E_ID = (payload: SERDE_Payload) => SERDE.encode(SERDE_Payload.toString(payload))
-    const RUN = (id: string, msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc_ser:${id} ${msg}`)
+    const RUN = (id: string, msg: string) =>
+      world.getDimension('overworld').runCommand(`scriptevent ipc_ser:${id} ${msg}`)
 
     const args_str = JSON.stringify(args)
 
@@ -737,44 +754,37 @@ export namespace NET {
   export function serde_listen(event_id: string, channel: string, callback: (args: any[]) => void) {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
     const jobs = new Array<number>()
-    const event_listener = system.afterEvents.scriptEventReceive.subscribe(
-      event => {
-        if (event.id.startsWith(`ipc_ser:`) && event.sourceType === ScriptEventSource.Server) {
-          const job = system.runJob(
-            (function* () {
-              const payload = SERDE_Payload.fromString(yield* SERDE.decode(event.id.slice(4)))
-              if (payload.event === event_id && payload.channel === channel) {
-                const data = yield* SERDE.decode(event.message)
-
-                const fragment = buffer.has(payload.id)
-                  ? buffer.get(payload.id)
-                  : buffer.set(payload.id, { size: -1, data_strs: [], data_size: 0 }).get(payload.id)
-                if (fragment !== undefined) {
-                  fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
-                  fragment.data_strs[payload.index ?? 0] = data
-                  fragment.data_size += (payload.index ?? 0) + 1
-                  if (fragment.size !== -1) {
-                    if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-                      let full_str = ''
-                      for (const str of fragment.data_strs) {
-                        full_str += str
-                        yield
-                      }
-                      callback(JSON.parse(full_str))
-                      buffer.delete(payload.id)
+    const listener_idx =
+      listeners.push((payload, data) => {
+        if (payload.event === event_id && payload.channel === channel) {
+          const fragment = buffer.has(payload.id)
+            ? buffer.get(payload.id)
+            : buffer.set(payload.id, { size: -1, data_strs: [], data_size: 0 }).get(payload.id)
+          if (fragment !== undefined) {
+            fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
+            fragment.data_strs[payload.index ?? 0] = data
+            fragment.data_size += (payload.index ?? 0) + 1
+            if (fragment.size !== -1) {
+              if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
+                const job = system.runJob(
+                  (function* () {
+                    let full_str = ''
+                    for (const str of fragment.data_strs) {
+                      full_str += str
+                      yield
                     }
-                  }
-                }
+                    callback(JSON.parse(full_str))
+                    buffer.delete(payload.id)
+                  })()
+                )
+                jobs.push(job)
               }
-            })()
-          )
-          jobs.push(job)
+            }
+          }
         }
-      },
-      { namespaces: ['ipc_ser'] }
-    )
+      }) - 1
     return () => {
-      system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
+      listeners.splice(listener_idx, 1)
       for (const job of jobs) {
         system.clearJob(job)
       }
