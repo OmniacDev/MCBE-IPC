@@ -489,27 +489,28 @@ namespace CRYPTO {
 export namespace NET {
   export const FRAG_MAX: number = 2048
 
-  const NAMESPACE = 'ipc_ser'
-  const listeners = new Array<(payload: SERDE_Payload, data: string) => void>()
+  const listeners = new Array<(payload: Payload, data: string) => Generator<void, void, void>>()
   const global_listener = system.afterEvents.scriptEventReceive.subscribe(
     event => {
       if (event.sourceType === ScriptEventSource.Server) {
         system.runJob(
           (function* () {
-            const payload = SERDE_Payload.fromString(yield* SERDE.decode(event.id.slice(NAMESPACE.length + 1)))
+            const payload = Payload.fromString(yield* SERDE.decode(event.id.split(':')[1]))
             const data = yield* SERDE.decode(event.message)
-            listeners.forEach(listener => listener(payload, data))
+            for (const listener of listeners) {
+              yield* listener(payload, data)
+            }
           })()
         )
       }
     },
-    { namespaces: [NAMESPACE] }
+    { namespaces: ['ipc'] }
   )
 
   interface Payload {
+    event: string
     channel: string
     id: string
-    data: string
     index?: number
     final?: boolean
   }
@@ -529,49 +530,12 @@ export namespace NET {
     export function toPacked(p: Payload): Packed {
       return p.index !== undefined
         ? p.final !== undefined
-          ? [p.channel, p.id, p.data, p.index, p.final ? 1 : 0]
-          : [p.channel, p.id, p.data, p.index]
-        : [p.channel, p.id, p.data]
-    }
-
-    export function fromPacked(p: Packed): Payload {
-      return p[3] !== undefined
-        ? p[4] !== undefined
-          ? { channel: p[0], id: p[1], data: p[2], index: p[3], final: p[4] === 1 }
-          : { channel: p[0], id: p[1], data: p[2], index: p[3] }
-        : { channel: p[0], id: p[1], data: p[2] }
-    }
-  }
-
-  interface SERDE_Payload {
-    event: string
-    channel: string
-    id: string
-    index?: number
-    final?: boolean
-  }
-
-  namespace SERDE_Payload {
-    export type Packed =
-      | [string, string, string]
-      | [string, string, string, number]
-      | [string, string, string, number, number]
-    export function toString(p: SERDE_Payload): string {
-      return JSON.stringify(toPacked(p))
-    }
-    export function fromString(s: string): SERDE_Payload {
-      return fromPacked(JSON.parse(s) as Packed)
-    }
-
-    export function toPacked(p: SERDE_Payload): Packed {
-      return p.index !== undefined
-        ? p.final !== undefined
           ? [p.event, p.channel, p.id, p.index, p.final ? 1 : 0]
           : [p.event, p.channel, p.id, p.index]
         : [p.event, p.channel, p.id]
     }
 
-    export function fromPacked(p: Packed): SERDE_Payload {
+    export function fromPacked(p: Packed): Payload {
       return p[3] !== undefined
         ? p[4] !== undefined
           ? { event: p[0], channel: p[1], id: p[2], index: p[3], final: p[4] === 1 }
@@ -590,116 +554,12 @@ export namespace NET {
     return [LUT[r & 0xff], LUT[(r >> 8) & 0xff], LUT[(r >> 16) & 0xff], LUT[(r >> 24) & 0xff]].join('')
   }
 
-  export function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
-    const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
-    const jobs = new Array<number>()
-    const event_listener = system.afterEvents.scriptEventReceive.subscribe(
-      event => {
-        if (event.id === `ipc:${event_id}` && event.sourceType === ScriptEventSource.Server) {
-          const p: Payload.Packed = JSON.parse(decodeURI(event.message))
-          if (p[0] === channel) {
-            const payload: Payload = Payload.fromPacked(p)
-            const fragment = buffer.has(payload.id)
-              ? buffer.get(payload.id)
-              : buffer.set(payload.id, { size: -1, data_strs: [], data_size: 0 }).get(payload.id)
-            if (fragment !== undefined) {
-              fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
-              fragment.data_strs[payload.index ?? 0] = payload.data
-              fragment.data_size += (payload.index ?? 0) + 1
-              if (fragment.size !== -1) {
-                if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-                  const job = system.runJob(
-                    (function* () {
-                      let full_str = ''
-                      for (const str of fragment.data_strs) {
-                        full_str += str
-                        yield
-                      }
-                      callback(JSON.parse(full_str))
-                      buffer.delete(payload.id)
-                    })()
-                  )
-                  jobs.push(job)
-                }
-              }
-            }
-          }
-        }
-      },
-      { namespaces: ['ipc'] }
-    )
-    return () => {
-      system.afterEvents.scriptEventReceive.unsubscribe(event_listener)
-      for (const job of jobs) {
-        system.clearJob(job)
-      }
-      jobs.length = 0
-    }
-  }
-
   export function* emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
     const ID = generate_id()
 
-    const MSG = (payload: Payload) => encodeURI(Payload.toString(payload))
-    const RUN = (msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${event_id} ${msg}`)
-    const msg = MSG({ channel: channel, id: ID, data: '' })
-
-    const args_str = JSON.stringify(args)
-
-    const chars = new Array<string>()
-    for (const char of args_str) {
-      chars.push(char)
-      yield
-    }
-
-    const enc_chars = new Array<string>()
-    {
-      let acc: string = ''
-      for (const char of JSON.stringify(args_str)) {
-        if (char === '\\' && acc.length === 0) {
-          acc += char
-        } else {
-          enc_chars.push(yield* SERDE.encode(acc + char))
-          acc = ''
-        }
-        yield
-      }
-    }
-
-    let len = 0
-    let str = ''
-    let enc_str_len = 0
-    for (let i = 0; i < chars.length; i++) {
-      const enc_char = enc_chars[i + 1]
-      const msg_len = enc_str_len + enc_char.length + msg.length + `,${len},1`.length
-      if (msg_len < NET.FRAG_MAX) {
-        str += chars[i]
-        enc_str_len += enc_char.length
-      } else {
-        RUN(MSG({ channel: channel, id: ID, data: str, index: len }))
-        len++
-        str = chars[i]
-        enc_str_len = enc_char.length
-      }
-      yield
-    }
-
-    RUN(
-      MSG(
-        len === 0
-          ? { channel: channel, id: ID, data: str }
-          : { channel: channel, id: ID, data: str, index: len, final: true }
-      )
-    )
-  }
-
-  export function* serde_emit(event_id: string, channel: string, args: any[]): Generator<void, void, void> {
-    const ID = generate_id()
-
     const MSG = (data: string) => SERDE.encode(data)
-    const E_ID = (payload: SERDE_Payload) => SERDE.encode(SERDE_Payload.toString(payload))
-    const RUN = (id: string, msg: string) =>
-      world.getDimension('overworld').runCommand(`scriptevent ipc_ser:${id} ${msg}`)
+    const E_ID = (payload: Payload) => SERDE.encode(Payload.toString(payload))
+    const RUN = (id: string, msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${id} ${msg}`)
 
     const args_str = JSON.stringify(args)
 
@@ -751,44 +611,35 @@ export namespace NET {
     )
   }
 
-  export function serde_listen(event_id: string, channel: string, callback: (args: any[]) => void) {
+  export function listen(event_id: string, channel: string, callback: (args: any[]) => void) {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
-    const jobs = new Array<number>()
-    const listener_idx =
-      listeners.push((payload, data) => {
-        if (payload.event === event_id && payload.channel === channel) {
-          const fragment = buffer.has(payload.id)
-            ? buffer.get(payload.id)
-            : buffer.set(payload.id, { size: -1, data_strs: [], data_size: 0 }).get(payload.id)
-          if (fragment !== undefined) {
-            fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
-            fragment.data_strs[payload.index ?? 0] = data
-            fragment.data_size += (payload.index ?? 0) + 1
-            if (fragment.size !== -1) {
-              if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-                const job = system.runJob(
-                  (function* () {
-                    let full_str = ''
-                    for (const str of fragment.data_strs) {
-                      full_str += str
-                      yield
-                    }
-                    callback(JSON.parse(full_str))
-                    buffer.delete(payload.id)
-                  })()
-                )
-                jobs.push(job)
+    const listener = function* (payload: Payload, data: string): Generator<void, void, void> {
+      if (payload.event === event_id && payload.channel === channel) {
+        const fragment = buffer.has(payload.id)
+          ? buffer.get(payload.id)
+          : buffer.set(payload.id, { size: -1, data_strs: [], data_size: 0 }).get(payload.id)
+        if (fragment !== undefined) {
+          fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
+          fragment.data_strs[payload.index ?? 0] = data
+          fragment.data_size += (payload.index ?? 0) + 1
+          if (fragment.size !== -1) {
+            if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
+              let full_str = ''
+              for (const str of fragment.data_strs) {
+                full_str += str
+                yield
               }
+              callback(JSON.parse(full_str))
+              buffer.delete(payload.id)
             }
           }
         }
-      }) - 1
-    return () => {
-      listeners.splice(listener_idx, 1)
-      for (const job of jobs) {
-        system.clearJob(job)
       }
-      jobs.length = 0
+    }
+    listeners.push(listener)
+    return () => {
+      const idx = listeners.indexOf(listener)
+      if (idx !== -1) listeners.splice(idx, 1)
     }
   }
 }
