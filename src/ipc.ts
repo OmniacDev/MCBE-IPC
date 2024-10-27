@@ -588,15 +588,29 @@ export namespace NET {
     let enc_str_len = 0
     for (let i = 0; i < chars.length; i++) {
       const enc_char = enc_chars[i + 1]
-      const msg_len = enc_str_len + enc_char.length
+      let enc_char_size = 0
+      for (let i = 0; i < enc_char.length; i++) {
+        const code = enc_char.charCodeAt(i)
+        if (code <= 0x7f) {
+          enc_char_size += 1
+        } else if (code <= 0x7ff) {
+          enc_char_size += 2
+        } else if (code <= 0xffff) {
+          enc_char_size += 3
+        } else {
+          enc_char_size += 4
+        }
+        yield
+      }
+      const msg_len = enc_str_len + enc_char_size
       if (msg_len < NET.FRAG_MAX) {
         str += chars[i]
-        enc_str_len += enc_char.length
+        enc_str_len += enc_char_size
       } else {
         RUN(yield* E_ID({ event: event_id, channel: channel, id: ID, index: len }), yield* MSG(str))
         len++
         str = chars[i]
-        enc_str_len = enc_char.length
+        enc_str_len = enc_char_size
       }
       yield
     }
