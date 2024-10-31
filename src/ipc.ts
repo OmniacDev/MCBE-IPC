@@ -496,9 +496,8 @@ export namespace NET {
         const namespace = yield* SERDE.decode(ids[0])
         if (event.sourceType === ScriptEventSource.Server && namespaces.has(namespace)) {
           const payload = Payload.fromString(yield* SERDE.decode(ids[1]))
-          const data = yield* SERDE.decode(event.message)
           for (let i = 0; i < listeners.length; i++) {
-            yield* listeners[i](namespace, payload, data)
+            yield* listeners[i](namespace, payload, event.message)
           }
         }
       })()
@@ -553,72 +552,51 @@ export namespace NET {
   }
 
   export function* emit(namespace: string, event: string, channel: string, args: any[]): Generator<void, void, void> {
-    const ID = generate_id()
+    const id = generate_id()
+    const enc_namespace = yield* SERDE.encode(namespace)
+    const args_str = yield* SERDE.encode(JSON.stringify(args))
 
-    const MSG = function* (data: string) {
-      return yield* SERDE.encode(data)
-    }
-    const E_ID = function* (namespace: string, payload: Payload) {
-      return `${yield* SERDE.encode(namespace)}:${yield* SERDE.encode(Payload.toString(payload))}`
-    }
-    const RUN = (id: string, msg: string) => world.getDimension('overworld').runCommand(`scriptevent ${id} ${msg}`)
-
-    const args_str = JSON.stringify(args)
-    const enc_chars = new Array<string>()
-    {
-      let acc: string = ''
-      const args_str_str = JSON.stringify(args_str)
-      for (let i = 0; i < args_str_str.length; i++) {
-        const char = args_str_str[i]
-        if (char === '\\' && acc.length === 0) {
-          acc += char
-        } else {
-          enc_chars.push(yield* SERDE.encode(acc + char))
-          acc = ''
-        }
-        yield
-      }
+    const RUN = function* (payload: Payload, data_str: string) {
+      world
+        .getDimension('overworld')
+        .runCommand(`scriptevent ${enc_namespace}:${yield* SERDE.encode(Payload.toString(payload))} ${data_str}`)
     }
 
     let len = 0
     let str = ''
-    let enc_str_len = 0
+    let str_size = 0
     for (let i = 0; i < args_str.length; i++) {
-      const enc_char = enc_chars[i + 1]
-      let enc_char_size = 0
-      for (let i = 0; i < enc_char.length; i++) {
-        const code = enc_char.charCodeAt(i)
-        if (code <= 0x7f) {
-          enc_char_size += 1
-        } else if (code <= 0x7ff) {
-          enc_char_size += 2
-        } else if (code <= 0xffff) {
-          enc_char_size += 3
-        } else {
-          enc_char_size += 4
-        }
-        yield
-      }
-      if (enc_str_len + enc_char_size < FRAG_MAX) {
-        str += args_str[i]
-        enc_str_len += enc_char_size
+      const char = args_str[i]
+
+      let char_size = 0
+      const code = char.charCodeAt(i)
+      if (code <= 0x7f) {
+        char_size += 1
+      } else if (code <= 0x7ff) {
+        char_size += 2
+      } else if (code <= 0xffff) {
+        char_size += 3
       } else {
-        RUN(yield* E_ID(namespace, { event: event, channel: channel, id: ID, index: len }), yield* MSG(str))
+        char_size += 4
+      }
+
+      if (str_size + char_size < FRAG_MAX) {
+        str += char
+        str_size += char_size
+      } else {
+        yield* RUN({ event: event, channel: channel, id: id, index: len }, str)
         len++
-        str = args_str[i]
-        enc_str_len = enc_char_size
+        str = char
+        str_size = char_size
       }
       yield
     }
 
-    RUN(
-      yield* E_ID(
-        namespace,
-        len === 0
-          ? { event: event, channel: channel, id: ID }
-          : { event: event, channel: channel, id: ID, index: len, final: true }
-      ),
-      yield* MSG(str)
+    yield* RUN(
+      len === 0
+        ? { event: event, channel: channel, id: id }
+        : { event: event, channel: channel, id: id, index: len, final: true },
+      str
     )
   }
 
@@ -640,7 +618,7 @@ export namespace NET {
                 full_str += fragment.data_strs[i]
                 yield
               }
-              callback(JSON.parse(full_str))
+              callback(JSON.parse(yield* SERDE.decode(full_str)))
               buffer.delete(payload.id)
             }
           }
