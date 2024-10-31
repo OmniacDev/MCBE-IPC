@@ -557,9 +557,8 @@ export namespace NET {
     const args_str = yield* SERDE.encode(JSON.stringify(args))
 
     const RUN = function* (payload: Payload, data_str: string) {
-      world
-        .getDimension('overworld')
-        .runCommand(`scriptevent ${enc_namespace}:${yield* SERDE.encode(Payload.toString(payload))} ${data_str}`)
+      const enc_payload = yield* SERDE.encode(Payload.toString(payload))
+      world.getDimension('overworld').runCommand(`scriptevent ${enc_namespace}:${enc_payload} ${data_str}`)
     }
 
     let len = 0
@@ -594,24 +593,24 @@ export namespace NET {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
     const listener = function* (event_namespace: string, payload: Payload, data: string): Generator<void, void, void> {
       if (event_namespace === namespace && payload.event === event && payload.channel === channel) {
-        const fragment = buffer.has(payload.id)
-          ? buffer.get(payload.id)
-          : buffer.set(payload.id, { size: -1, data_strs: [], data_size: 0 }).get(payload.id)
-        if (fragment !== undefined) {
-          fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
-          fragment.data_strs[payload.index ?? 0] = data
-          fragment.data_size += (payload.index ?? 0) + 1
-          if (fragment.size !== -1) {
-            if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-              let full_str = ''
-              for (let i = 0; i < fragment.data_strs.length; i++) {
-                full_str += fragment.data_strs[i]
-                yield
-              }
-              callback(JSON.parse(yield* SERDE.decode(full_str)))
-              buffer.delete(payload.id)
-            }
+        let fragment = buffer.get(payload.id)
+        if (!fragment) {
+          fragment = { size: -1, data_strs: [], data_size: 0 }
+          buffer.set(payload.id, fragment)
+        }
+
+        fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
+        fragment.data_strs[payload.index ?? 0] = data
+        fragment.data_size += (payload.index ?? 0) + 1
+
+        if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
+          let full_str = ''
+          for (let i = 0; i < fragment.data_strs.length; i++) {
+            full_str += fragment.data_strs[i]
+            yield
           }
+          callback(JSON.parse(yield* SERDE.decode(full_str)))
+          buffer.delete(payload.id)
         }
       }
     }
