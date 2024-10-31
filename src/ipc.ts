@@ -401,9 +401,9 @@ namespace SERDE {
       const char = str.charAt(i)
       const char_code = char.charCodeAt(0)
       if ((i === 0 && INVALID_START_CODES.includes(char_code)) || INVALID_CODES.includes(char_code)) {
-        result += (`?${(yield* b64_encode(char)).padStart(2, '0')}`)
+        result += `?${(yield* b64_encode(char)).padStart(2, '0')}`
       } else {
-        result += (char)
+        result += char
       }
       yield
     }
@@ -415,9 +415,9 @@ namespace SERDE {
     const seqs = str.match(sequence_regex) ?? []
     for (let i = 0; i < seqs.length; i++) {
       const seq = seqs[i]
-      if (seq.startsWith('?') && encoded_regex.test(seq)) result += (yield* b64_decode(seq.slice(1)))
+      if (seq.startsWith('?') && encoded_regex.test(seq)) result += yield* b64_decode(seq.slice(1))
       else {
-        result += (seq)
+        result += seq
       }
       yield
     }
