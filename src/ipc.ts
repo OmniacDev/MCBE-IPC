@@ -563,7 +563,9 @@ export namespace NET {
     const enc_chars = new Array<string>()
     {
       let acc: string = ''
-      for (const char of JSON.stringify(args_str)) {
+      const args_str_str = JSON.stringify(args_str)
+      for (let i = 0; i < args_str_str.length; i++) {
+        const char = args_str_str[i]
         if (char === '\\' && acc.length === 0) {
           acc += char
         } else {
