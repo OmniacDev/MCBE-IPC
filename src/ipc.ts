@@ -373,17 +373,14 @@ namespace SERDE {
   ]
 
   const sequence_regex = /\?{1}[0-9a-zA-Z\.\-]{2}|[^?]+/g
-  const UTF8_regex = /^\?{1}[0-9a-zA-Z\.\-]{2}$/
+  const encoded_regex = /^\?{1}[0-9a-zA-Z\.\-]{2}$/
 
   const BASE64 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-'
 
   export function* b64_encode(char: string) {
-    let code = char.charCodeAt(0)
     let encoded = ''
-
-    while (code > 0) {
+    for (let code = char.charCodeAt(0); code > 0; code = Math.floor(code / 64)) {
       encoded = BASE64[code % 64] + encoded
-      code = Math.floor(code / 64)
       yield
     }
     return encoded
@@ -399,30 +396,32 @@ namespace SERDE {
   }
 
   export function* encode(str: string): Generator<void, string, void> {
-    const result = new Array<string>()
+    let result = ''
     for (let i = 0; i < str.length; i++) {
       const char = str.charAt(i)
       const char_code = char.charCodeAt(0)
       if ((i === 0 && INVALID_START_CODES.includes(char_code)) || INVALID_CODES.includes(char_code)) {
-        result.push(`?${(yield* b64_encode(char)).padStart(2, '0')}`)
+        result += (`?${(yield* b64_encode(char)).padStart(2, '0')}`)
       } else {
-        result.push(char)
+        result += (char)
       }
       yield
     }
-    return result.join('')
+    return result
   }
 
   export function* decode(str: string): Generator<void, string, void> {
-    const result = new Array<string>()
-    for (const seq of str.match(sequence_regex) ?? []) {
-      if (seq.startsWith('?') && UTF8_regex.test(seq)) result.push(yield* b64_decode(seq.slice(1)))
+    let result = ''
+    const seqs = str.match(sequence_regex) ?? []
+    for (let i = 0; i < seqs.length; i++) {
+      const seq = seqs[i]
+      if (seq.startsWith('?') && encoded_regex.test(seq)) result += (yield* b64_decode(seq.slice(1)))
       else {
-        result.push(seq)
+        result += (seq)
       }
       yield
     }
-    return result.join('')
+    return result
   }
 }
 
@@ -435,13 +434,12 @@ namespace CRYPTO {
 
   function* mod_exp(base: number, exp: number, mod: number): Generator<void, number, void> {
     let result = 1
-    base = base % mod
-    while (exp > 0) {
-      if (exp % 2 === 1) {
-        result = (result * base) % mod
+    let b = base % mod
+    for (let e = exp; e > 0; e = Math.floor(e / 2)) {
+      if (e % 2 === 1) {
+        result = (result * b) % mod
       }
-      exp = Math.floor(exp / 2)
-      base = (base * base) % mod
+      b = (b * b) % mod
       yield
     }
     return result
@@ -497,8 +495,8 @@ export namespace NET {
           (function* () {
             const payload = Payload.fromString(yield* SERDE.decode(event.id.split(':')[1]))
             const data = yield* SERDE.decode(event.message)
-            for (const listener of listeners) {
-              yield* listener(payload, data)
+            for (let i = 0; i < listeners.length; i++) {
+              yield* listeners[i](payload, data)
             }
           })()
         )
@@ -545,7 +543,7 @@ export namespace NET {
   }
 
   const LUT: string[] = Array.from<string, string>({ length: 256 }, (_v, i) => {
-    return (i < 16 ? '0' : '') + i.toString(16).toUpperCase()
+    return i.toString(16).toUpperCase().padStart(2, '0')
   })
 
   function generate_id(): string {
@@ -562,13 +560,6 @@ export namespace NET {
     const RUN = (id: string, msg: string) => world.getDimension('overworld').runCommand(`scriptevent ipc:${id} ${msg}`)
 
     const args_str = JSON.stringify(args)
-
-    const chars = new Array<string>()
-    for (const char of args_str) {
-      chars.push(char)
-      yield
-    }
-
     const enc_chars = new Array<string>()
     {
       let acc: string = ''
@@ -586,7 +577,7 @@ export namespace NET {
     let len = 0
     let str = ''
     let enc_str_len = 0
-    for (let i = 0; i < chars.length; i++) {
+    for (let i = 0; i < args_str.length; i++) {
       const enc_char = enc_chars[i + 1]
       let enc_char_size = 0
       for (let i = 0; i < enc_char.length; i++) {
@@ -602,14 +593,13 @@ export namespace NET {
         }
         yield
       }
-      const msg_len = enc_str_len + enc_char_size
-      if (msg_len < NET.FRAG_MAX) {
-        str += chars[i]
+      if (enc_str_len + enc_char_size < NET.FRAG_MAX) {
+        str += args_str[i]
         enc_str_len += enc_char_size
       } else {
         RUN(yield* E_ID({ event: event_id, channel: channel, id: ID, index: len }), yield* MSG(str))
         len++
-        str = chars[i]
+        str = args_str[i]
         enc_str_len = enc_char_size
       }
       yield
@@ -639,8 +629,8 @@ export namespace NET {
           if (fragment.size !== -1) {
             if (fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
               let full_str = ''
-              for (const str of fragment.data_strs) {
-                full_str += str
+              for (let i = 0; i < fragment.data_strs.length; i++) {
+                full_str += fragment.data_strs[i]
                 yield
               }
               callback(JSON.parse(full_str))
