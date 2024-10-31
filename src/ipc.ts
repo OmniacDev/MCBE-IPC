@@ -567,18 +567,8 @@ export namespace NET {
     let str_size = 0
     for (let i = 0; i < args_str.length; i++) {
       const char = args_str[i]
-
-      let char_size = 0
-      const code = char.charCodeAt(i)
-      if (code <= 0x7f) {
-        char_size += 1
-      } else if (code <= 0x7ff) {
-        char_size += 2
-      } else if (code <= 0xffff) {
-        char_size += 3
-      } else {
-        char_size += 4
-      }
+      const code = char.charCodeAt(0)
+      const char_size = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4
 
       if (str_size + char_size < FRAG_MAX) {
         str += char
