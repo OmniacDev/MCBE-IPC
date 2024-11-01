@@ -334,8 +334,8 @@ namespace SERDE {
     126, 127
   ]
 
-  const sequence_regex = /\?{1}[0-9a-zA-Z\.\-]{2}|[^?]+/g
-  const encoded_regex = /^\?{1}[0-9a-zA-Z\.\-]{2}$/
+  const sequence_regex = /\?[0-9a-zA-Z.\-]{2}|[^?]+/g
+  const encoded_regex = /^\?[0-9a-zA-Z.\-]{2}$/
 
   const BASE64 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-'
 
@@ -449,44 +449,39 @@ namespace CRYPTO {
 export namespace NET {
   const FRAG_MAX: number = 2048
 
-  const namespace_sub_listeners = new Map<
-    string,
-    Array<(payload: Payload, data: string) => Generator<void, void, void>>
-  >()
+  type Listener = (payload: Payload, data: string) => Generator<void, void, void>
+  const namespace_listeners = new Map<string, Array<Listener>>()
 
-  const global_listener = system.afterEvents.scriptEventReceive.subscribe(event => {
+  system.afterEvents.scriptEventReceive.subscribe(event => {
     system.runJob(
       (function* () {
         const ids = event.id.split(':')
         const namespace = yield* SERDE.decode(ids[0])
-        const sub_listeners = namespace_sub_listeners.get(namespace)
-        if (event.sourceType === ScriptEventSource.Server && sub_listeners) {
+        const listeners = namespace_listeners.get(namespace)
+        if (event.sourceType === ScriptEventSource.Server && listeners) {
           const payload = Payload.fromString(yield* SERDE.decode(ids[1]))
-          for (let i = 0; i < sub_listeners.length; i++) {
-            yield* sub_listeners[i](payload, event.message)
+          for (let i = 0; i < listeners.length; i++) {
+            yield* listeners[i](payload, event.message)
           }
         }
       })()
     )
   })
 
-  function create_listener(
-    namespace: string,
-    listener: (payload: Payload, data: string) => Generator<void, void, void>
-  ) {
-    let sub_listeners = namespace_sub_listeners.get(namespace)
-    if (!sub_listeners) {
-      sub_listeners = new Array<(payload: Payload, data: string) => Generator<void, void, void>>()
-      namespace_sub_listeners.set(namespace, sub_listeners)
+  function create_listener(namespace: string, listener: Listener) {
+    let listeners = namespace_listeners.get(namespace)
+    if (!listeners) {
+      listeners = new Array<Listener>()
+      namespace_listeners.set(namespace, listeners)
     }
-    sub_listeners.push(listener)
+    listeners.push(listener)
 
     return () => {
-      const idx = sub_listeners.indexOf(listener)
-      if (idx !== -1) sub_listeners.splice(idx, 1)
+      const idx = listeners.indexOf(listener)
+      if (idx !== -1) listeners.splice(idx, 1)
 
-      if (sub_listeners.length === 0) {
-        namespace_sub_listeners.delete(namespace)
+      if (listeners.length === 0) {
+        namespace_listeners.delete(namespace)
       }
     }
   }
