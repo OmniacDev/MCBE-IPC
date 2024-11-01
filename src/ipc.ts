@@ -500,14 +500,14 @@ export namespace NET {
     }
   }
 
-  const LUT: string[] = Array.from<string, string>({ length: 256 }, (_v, i) => {
-    return i.toString(16).toUpperCase().padStart(2, '0')
-  })
-
   function generate_id(): string {
     const r = (Math.random() * 0x100000000) >>> 0
-
-    return [LUT[r & 0xff], LUT[(r >> 8) & 0xff], LUT[(r >> 16) & 0xff], LUT[(r >> 24) & 0xff]].join('')
+    return (
+      (r & 0xff).toString(16).padStart(2, '0') +
+      ((r >> 8) & 0xff).toString(16).padStart(2, '0') +
+      ((r >> 16) & 0xff).toString(16).padStart(2, '0') +
+      ((r >> 24) & 0xff).toString(16).padStart(2, '0')
+    ).toUpperCase()
   }
 
   export function* emit(namespace: string, event: string, channel: string, args: any[]): Generator<void, void, void> {
@@ -550,8 +550,10 @@ export namespace NET {
     callback: (args: any[]) => Generator<void, void, void>
   ) {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
-    const listener = function* (payload: Payload, data: string): Generator<void, void, void> {
-      const [p_event, p_channel, id, index, final] = payload
+    const listener = function* (
+      [p_event, p_channel, id, index, final]: Payload,
+      data: string
+    ): Generator<void, void, void> {
       if (p_event === event && p_channel === channel) {
         if (index === undefined) {
           yield* callback(JSON.parse(yield* SERDE.decode(data)))
