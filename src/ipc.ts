@@ -449,17 +449,42 @@ namespace CRYPTO {
 export namespace NET {
   const FRAG_MAX: number = 2048
 
-  const namespaces = new Set<string>()
-  const listeners = new Array<(namespace: string, payload: Payload, data: string) => Generator<void, void, void>>()
+  const namespace_sub_listeners = new Map<
+    string,
+    Array<(payload: Payload, data: string) => Generator<void, void, void>>
+  >()
+
+  function create_listener(
+    namespace: string,
+    listener: (payload: Payload, data: string) => Generator<void, void, void>
+  ) {
+    let sub_listeners = namespace_sub_listeners.get(namespace)
+    if (!sub_listeners) {
+      sub_listeners = new Array<(payload: Payload, data: string) => Generator<void, void, void>>()
+      namespace_sub_listeners.set(namespace, sub_listeners)
+    }
+    sub_listeners.push(listener)
+
+    return () => {
+      const idx = sub_listeners.indexOf(listener)
+      if (idx !== -1) sub_listeners.splice(idx, 1)
+
+      if (sub_listeners.length === 0) {
+        namespace_sub_listeners.delete(namespace)
+      }
+    }
+  }
+
   const global_listener = system.afterEvents.scriptEventReceive.subscribe(event => {
     system.runJob(
       (function* () {
         const ids = event.id.split(':')
         const namespace = yield* SERDE.decode(ids[0])
-        if (event.sourceType === ScriptEventSource.Server && namespaces.has(namespace)) {
+        const sub_listeners = namespace_sub_listeners.get(namespace)
+        if (event.sourceType === ScriptEventSource.Server && sub_listeners) {
           const payload = Payload.fromString(yield* SERDE.decode(ids[1]))
-          for (let i = 0; i < listeners.length; i++) {
-            yield* listeners[i](namespace, payload, event.message)
+          for (let i = 0; i < sub_listeners.length; i++) {
+            yield* sub_listeners[i](payload, event.message)
           }
         }
       })()
@@ -558,8 +583,8 @@ export namespace NET {
     callback: (args: any[]) => Generator<void, void, void>
   ) {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
-    const listener = function* (event_namespace: string, payload: Payload, data: string): Generator<void, void, void> {
-      if (event_namespace === namespace && payload.event === event && payload.channel === channel) {
+    const listener = function* (payload: Payload, data: string): Generator<void, void, void> {
+      if (payload.event === event && payload.channel === channel) {
         let fragment = buffer.get(payload.id)
         if (!fragment) {
           fragment = { size: -1, data_strs: [], data_size: 0 }
@@ -581,11 +606,6 @@ export namespace NET {
         }
       }
     }
-    namespaces.add(namespace)
-    listeners.push(listener)
-    return () => {
-      const idx = listeners.indexOf(listener)
-      if (idx !== -1) listeners.splice(idx, 1)
-    }
+    return create_listener(namespace, listener)
   }
 }
