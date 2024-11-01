@@ -83,14 +83,10 @@ namespace IPC {
       )
 
       return new Promise(resolve => {
-        const terminate = NET.listen('ipc', 'handle', `${$._from}:${channel}`, args => {
+        const terminate = NET.listen('ipc', 'handle', `${$._from}:${channel}`, function* (args) {
           if (args[0] === $._to) {
-            system.runJob(
-              (function* () {
-                const data = yield* $.MAYBE_DECRYPT(args)
-                resolve(data)
-              })()
-            )
+            const data = yield* $.MAYBE_DECRYPT(args)
+            resolve(data)
             terminate()
           }
         })
@@ -99,14 +95,10 @@ namespace IPC {
 
     on(channel: string, listener: (...args: any[]) => void) {
       const $ = this
-      const terminate = NET.listen('ipc', 'send', `${$._from}:${channel}`, args => {
+      const terminate = NET.listen('ipc', 'send', `${$._from}:${channel}`, function* (args) {
         if (args[0] === $._to) {
-          system.runJob(
-            (function* () {
-              const data = yield* $.MAYBE_DECRYPT(args)
-              listener(...data)
-            })()
-          )
+          const data = yield* $.MAYBE_DECRYPT(args)
+          listener(...data)
         }
       })
       $._terminators.push(terminate)
@@ -115,14 +107,10 @@ namespace IPC {
 
     once(channel: string, listener: (...args: any[]) => void) {
       const $ = this
-      const terminate = NET.listen('ipc', 'send', `${$._from}:${channel}`, args => {
+      const terminate = NET.listen('ipc', 'send', `${$._from}:${channel}`, function* (args) {
         if (args[0] === $._to) {
-          system.runJob(
-            (function* () {
-              const data = yield* $.MAYBE_DECRYPT(args)
-              listener(...data)
-            })()
-          )
+          const data = yield* $.MAYBE_DECRYPT(args)
+          listener(...data)
           terminate()
         }
       })
@@ -132,16 +120,12 @@ namespace IPC {
 
     handle(channel: string, listener: (...args: any[]) => any) {
       const $ = this
-      const terminate = NET.listen('ipc', 'invoke', `${$._from}:${channel}`, args => {
+      const terminate = NET.listen('ipc', 'invoke', `${$._from}:${channel}`, function* (args) {
         if (args[0] === $._to) {
-          system.runJob(
-            (function* () {
-              const data = yield* $.MAYBE_DECRYPT(args)
-              const result = listener(...data)
-              const return_data = yield* $.MAYBE_ENCRYPT(result)
-              yield* NET.emit('ipc', 'handle', `${$._to}:${channel}`, [$._from, return_data])
-            })()
-          )
+          const data = yield* $.MAYBE_DECRYPT(args)
+          const result = listener(...data)
+          const return_data = yield* $.MAYBE_ENCRYPT(result)
+          yield* NET.emit('ipc', 'handle', `${$._to}:${channel}`, [$._from, return_data])
         }
       })
       $._terminators.push(terminate)
@@ -172,20 +156,16 @@ namespace IPC {
       this._enc_map = new Map<string, string | false>()
       this._con_map = new Map<string, Connection>()
       this._enc_force = force_encryption
-      NET.listen('ipc', 'handshake', `${this._id}:SYN`, args => {
-        system.runJob(
-          (function* () {
-            const secret = CRYPTO.make_secret(args[4])
-            const public_key = yield* CRYPTO.make_public(secret, args[4], args[3])
-            const enc = args[1] === 1 || $._enc_force ? yield* CRYPTO.make_shared(secret, args[2], args[3]) : false
-            $._enc_map.set(args[0], enc)
-            yield* NET.emit('ipc', 'handshake', `${args[0]}:ACK`, [$._id, $._enc_force ? 1 : 0, public_key])
-          })()
-        )
+      NET.listen('ipc', 'handshake', `${this._id}:SYN`, function* (args) {
+        const secret = CRYPTO.make_secret(args[4])
+        const public_key = yield* CRYPTO.make_public(secret, args[4], args[3])
+        const enc = args[1] === 1 || $._enc_force ? yield* CRYPTO.make_shared(secret, args[2], args[3]) : false
+        $._enc_map.set(args[0], enc)
+        yield* NET.emit('ipc', 'handshake', `${args[0]}:ACK`, [$._id, $._enc_force ? 1 : 0, public_key])
       })
 
-      NET.listen('ipc', 'terminate', this._id, args => {
-        this._enc_map.delete(args[0])
+      NET.listen('ipc', 'terminate', this._id, function* (args) {
+        $._enc_map.delete(args[0])
       })
     }
 
@@ -213,16 +193,12 @@ namespace IPC {
             reject()
             clear()
           }, timeout)
-          const terminate = NET.listen('ipc', 'handshake', `${this._id}:ACK`, args => {
+          const terminate = NET.listen('ipc', 'handshake', `${this._id}:ACK`, function* (args) {
             if (args[0] === to) {
-              system.runJob(
-                (function* () {
-                  const enc = args[1] === 1 || encrypted ? yield* CRYPTO.make_shared(secret, args[2]) : false
-                  const new_con = new Connection($._id, to, enc)
-                  $._con_map.set(to, new_con)
-                  resolve(new_con)
-                })()
-              )
+              const enc = args[1] === 1 || encrypted ? yield* CRYPTO.make_shared(secret, args[2]) : false
+              const new_con = new Connection($._id, to, enc)
+              $._con_map.set(to, new_con)
+              resolve(new_con)
               clear()
             }
           })
@@ -256,14 +232,10 @@ namespace IPC {
 
         promises.push(
           new Promise(resolve => {
-            const terminate = NET.listen('ipc', 'handle', `${$._id}:${channel}`, args => {
+            const terminate = NET.listen('ipc', 'handle', `${$._id}:${channel}`, function* (args) {
               if (args[0] === key) {
-                system.runJob(
-                  (function* () {
-                    const data = yield* $.MAYBE_DECRYPT(args, value)
-                    resolve(data)
-                  })()
-                )
+                const data = yield* $.MAYBE_DECRYPT(args, value)
+                resolve(data)
                 terminate()
               }
             })
@@ -275,30 +247,22 @@ namespace IPC {
 
     on(channel: string, listener: (...args: any[]) => void) {
       const $ = this
-      return NET.listen('ipc', 'send', `${$._id}:${channel}`, args => {
-        const enc = this._enc_map.get(args[0]) as string | false
+      return NET.listen('ipc', 'send', `${$._id}:${channel}`, function* (args) {
+        const enc = $._enc_map.get(args[0]) as string | false
         if (enc !== undefined) {
-          system.runJob(
-            (function* () {
-              const data = yield* $.MAYBE_DECRYPT(args, enc)
-              listener(...data)
-            })()
-          )
+          const data = yield* $.MAYBE_DECRYPT(args, enc)
+          listener(...data)
         }
       })
     }
 
     once(channel: string, listener: (...args: any[]) => void) {
       const $ = this
-      const terminate = NET.listen('ipc', 'send', `${$._id}:${channel}`, args => {
-        const enc = this._enc_map.get(args[0]) as string | false
+      const terminate = NET.listen('ipc', 'send', `${$._id}:${channel}`, function* (args) {
+        const enc = $._enc_map.get(args[0]) as string | false
         if (enc !== undefined) {
-          system.runJob(
-            (function* () {
-              const data = yield* $.MAYBE_DECRYPT(args, enc)
-              listener(...data)
-            })()
-          )
+          const data = yield* $.MAYBE_DECRYPT(args, enc)
+          listener(...data)
           terminate()
         }
       })
@@ -307,17 +271,13 @@ namespace IPC {
 
     handle(channel: string, listener: (...args: any[]) => any) {
       const $ = this
-      return NET.listen('ipc', 'invoke', `${$._id}:${channel}`, args => {
-        const enc = this._enc_map.get(args[0]) as string | false
+      return NET.listen('ipc', 'invoke', `${$._id}:${channel}`, function* (args) {
+        const enc = $._enc_map.get(args[0]) as string | false
         if (enc !== undefined) {
-          system.runJob(
-            (function* () {
-              const data = yield* $.MAYBE_DECRYPT(args, enc)
-              const result = listener(...data)
-              const return_data = yield* $.MAYBE_ENCRYPT(result, enc)
-              yield* NET.emit('ipc', 'handle', `${args[0]}:${channel}`, [$._id, return_data])
-            })()
-          )
+          const data = yield* $.MAYBE_DECRYPT(args, enc)
+          const result = listener(...data)
+          const return_data = yield* $.MAYBE_ENCRYPT(result, enc)
+          yield* NET.emit('ipc', 'handle', `${args[0]}:${channel}`, [$._id, return_data])
         }
       })
     }
@@ -332,7 +292,7 @@ namespace IPC {
   export function invoke(channel: string, ...args: any[]): Promise<any> {
     system.runJob(NET.emit('ipc', 'invoke', channel, args))
     return new Promise(resolve => {
-      const terminate = NET.listen('ipc', 'handle', channel, args => {
+      const terminate = NET.listen('ipc', 'handle', channel, function* (args) {
         resolve(args[0])
         terminate()
       })
@@ -341,12 +301,14 @@ namespace IPC {
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on(channel: string, listener: (...args: any[]) => void) {
-    return NET.listen('ipc', 'send', channel, args => listener(...args))
+    return NET.listen('ipc', 'send', channel, function* (args) {
+      listener(...args)
+    })
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
   export function once(channel: string, listener: (...args: any[]) => void) {
-    const terminate = NET.listen('ipc', 'send', channel, args => {
+    const terminate = NET.listen('ipc', 'send', channel, function* (args) {
       listener(...args)
       terminate()
     })
@@ -355,9 +317,9 @@ namespace IPC {
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
   export function handle(channel: string, listener: (...args: any[]) => any) {
-    return NET.listen('ipc', 'invoke', channel, args => {
+    return NET.listen('ipc', 'invoke', channel, function* (args) {
       const result = listener(...args)
-      system.runJob(NET.emit('ipc', 'handle', channel, [result]))
+      yield* NET.emit('ipc', 'handle', channel, [result])
     })
   }
 }
@@ -589,7 +551,12 @@ export namespace NET {
     )
   }
 
-  export function listen(namespace: string, event: string, channel: string, callback: (args: any[]) => void) {
+  export function listen(
+    namespace: string,
+    event: string,
+    channel: string,
+    callback: (args: any[]) => Generator<void, void, void>
+  ) {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
     const listener = function* (event_namespace: string, payload: Payload, data: string): Generator<void, void, void> {
       if (event_namespace === namespace && payload.event === event && payload.channel === channel) {
@@ -609,7 +576,7 @@ export namespace NET {
             full_str += fragment.data_strs[i]
             yield
           }
-          callback(JSON.parse(yield* SERDE.decode(full_str)))
+          yield* callback(JSON.parse(yield* SERDE.decode(full_str)))
           buffer.delete(payload.id)
         }
       }
