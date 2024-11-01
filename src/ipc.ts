@@ -513,7 +513,7 @@ export namespace NET {
   export function* emit(namespace: string, event: string, channel: string, args: any[]): Generator<void, void, void> {
     const id = generate_id()
     const enc_namespace = yield* SERDE.encode(namespace)
-    const args_str = yield* SERDE.encode(JSON.stringify(args))
+    const enc_args_str = yield* SERDE.encode(JSON.stringify(args))
 
     const RUN = function* (payload: Payload, data_str: string) {
       const enc_payload = yield* SERDE.encode(Payload.toString(payload))
@@ -523,8 +523,8 @@ export namespace NET {
     let len = 0
     let str = ''
     let str_size = 0
-    for (let i = 0; i < args_str.length; i++) {
-      const char = args_str[i]
+    for (let i = 0; i < enc_args_str.length; i++) {
+      const char = enc_args_str[i]
       const code = char.charCodeAt(0)
       const char_size = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4
 
@@ -551,22 +551,22 @@ export namespace NET {
   ) {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
     const listener = function* (
-      [p_event, p_channel, id, index, final]: Payload,
+      [p_event, p_channel, p_id, p_index, p_final]: Payload,
       data: string
     ): Generator<void, void, void> {
       if (p_event === event && p_channel === channel) {
-        if (index === undefined) {
+        if (p_index === undefined) {
           yield* callback(JSON.parse(yield* SERDE.decode(data)))
         } else {
-          let fragment = buffer.get(id)
+          let fragment = buffer.get(p_id)
           if (!fragment) {
             fragment = { size: -1, data_strs: [], data_size: 0 }
-            buffer.set(id, fragment)
+            buffer.set(p_id, fragment)
           }
 
-          fragment.size = final === 1 ? index + 1 : fragment.size
-          fragment.data_strs[index] = data
-          fragment.data_size += index + 1
+          fragment.size = p_final === 1 ? p_index + 1 : fragment.size
+          fragment.data_strs[p_index] = data
+          fragment.data_size += p_index + 1
 
           if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
             let full_str = ''
@@ -575,7 +575,7 @@ export namespace NET {
               yield
             }
             yield* callback(JSON.parse(yield* SERDE.decode(full_str)))
-            buffer.delete(id)
+            buffer.delete(p_id)
           }
         }
       }
