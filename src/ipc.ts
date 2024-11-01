@@ -486,40 +486,17 @@ export namespace NET {
     }
   }
 
-  interface Payload {
-    event: string
-    channel: string
-    id: string
-    index?: number
-    final?: boolean
-  }
+  type Payload =
+    | [event: string, channel: string, id: string]
+    | [event: string, channel: string, id: string, index: number]
+    | [event: string, channel: string, id: string, index: number, final: number]
 
   namespace Payload {
-    export type Packed =
-      | [event: string, channel: string, id: string]
-      | [event: string, channel: string, id: string, index: number]
-      | [event: string, channel: string, id: string, index: number, final: number]
     export function toString(p: Payload): string {
-      return JSON.stringify(toPacked(p))
+      return JSON.stringify(p)
     }
     export function fromString(s: string): Payload {
-      return fromPacked(JSON.parse(s) as Packed)
-    }
-
-    export function toPacked(p: Payload): Packed {
-      return p.index !== undefined
-        ? p.final !== undefined
-          ? [p.event, p.channel, p.id, p.index, p.final ? 1 : 0]
-          : [p.event, p.channel, p.id, p.index]
-        : [p.event, p.channel, p.id]
-    }
-
-    export function fromPacked(p: Packed): Payload {
-      return p[3] !== undefined
-        ? p[4] !== undefined
-          ? { event: p[0], channel: p[1], id: p[2], index: p[3], final: p[4] === 1 }
-          : { event: p[0], channel: p[1], id: p[2], index: p[3] }
-        : { event: p[0], channel: p[1], id: p[2] }
+      return JSON.parse(s)
     }
   }
 
@@ -555,7 +532,7 @@ export namespace NET {
         str += char
         str_size += char_size
       } else {
-        yield* RUN({ event: event, channel: channel, id: id, index: len }, str)
+        yield* RUN([event, channel, id, len], str)
         len++
         str = char
         str_size = char_size
@@ -563,12 +540,7 @@ export namespace NET {
       yield
     }
 
-    yield* RUN(
-      len === 0
-        ? { event: event, channel: channel, id: id }
-        : { event: event, channel: channel, id: id, index: len, final: true },
-      str
-    )
+    yield* RUN(len === 0 ? [event, channel, id] : [event, channel, id, len, 1], str)
   }
 
   export function listen(
@@ -579,16 +551,17 @@ export namespace NET {
   ) {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
     const listener = function* (payload: Payload, data: string): Generator<void, void, void> {
-      if (payload.event === event && payload.channel === channel) {
-        let fragment = buffer.get(payload.id)
+      const [p_event, p_channel, id, index, final] = payload
+      if (p_event === event && p_channel === channel) {
+        let fragment = buffer.get(id)
         if (!fragment) {
           fragment = { size: -1, data_strs: [], data_size: 0 }
-          buffer.set(payload.id, fragment)
+          buffer.set(id, fragment)
         }
 
-        fragment.size = payload.index === undefined ? 1 : payload.final ? payload.index + 1 : fragment.size
-        fragment.data_strs[payload.index ?? 0] = data
-        fragment.data_size += (payload.index ?? 0) + 1
+        fragment.size = index === undefined ? 1 : final === 1 ? index + 1 : fragment.size
+        fragment.data_strs[index ?? 0] = data
+        fragment.data_size += (index ?? 0) + 1
 
         if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
           let full_str = ''
@@ -597,7 +570,7 @@ export namespace NET {
             yield
           }
           yield* callback(JSON.parse(yield* SERDE.decode(full_str)))
-          buffer.delete(payload.id)
+          buffer.delete(id)
         }
       }
     }
