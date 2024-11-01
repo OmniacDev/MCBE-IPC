@@ -496,9 +496,9 @@ export namespace NET {
 
   namespace Payload {
     export type Packed =
-      | [string, string, string]
-      | [string, string, string, number]
-      | [string, string, string, number, number]
+      | [event: string, channel: string, id: string]
+      | [event: string, channel: string, id: string, index: number]
+      | [event: string, channel: string, id: string, index: number, final: number]
     export function toString(p: Payload): string {
       return JSON.stringify(toPacked(p))
     }
