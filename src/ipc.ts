@@ -553,24 +553,28 @@ export namespace NET {
     const listener = function* (payload: Payload, data: string): Generator<void, void, void> {
       const [p_event, p_channel, id, index, final] = payload
       if (p_event === event && p_channel === channel) {
-        let fragment = buffer.get(id)
-        if (!fragment) {
-          fragment = { size: -1, data_strs: [], data_size: 0 }
-          buffer.set(id, fragment)
-        }
-
-        fragment.size = index === undefined ? 1 : final === 1 ? index + 1 : fragment.size
-        fragment.data_strs[index ?? 0] = data
-        fragment.data_size += (index ?? 0) + 1
-
-        if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-          let full_str = ''
-          for (let i = 0; i < fragment.data_strs.length; i++) {
-            full_str += fragment.data_strs[i]
-            yield
+        if (index === undefined) {
+          yield* callback(JSON.parse(yield* SERDE.decode(data)))
+        } else {
+          let fragment = buffer.get(id)
+          if (!fragment) {
+            fragment = { size: -1, data_strs: [], data_size: 0 }
+            buffer.set(id, fragment)
           }
-          yield* callback(JSON.parse(yield* SERDE.decode(full_str)))
-          buffer.delete(id)
+
+          fragment.size = final === 1 ? index + 1 : fragment.size
+          fragment.data_strs[index] = data
+          fragment.data_size += index + 1
+
+          if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
+            let full_str = ''
+            for (let i = 0; i < fragment.data_strs.length; i++) {
+              full_str += fragment.data_strs[i]
+              yield
+            }
+            yield* callback(JSON.parse(yield* SERDE.decode(full_str)))
+            buffer.delete(id)
+          }
         }
       }
     }
