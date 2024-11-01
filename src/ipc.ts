@@ -454,6 +454,22 @@ export namespace NET {
     Array<(payload: Payload, data: string) => Generator<void, void, void>>
   >()
 
+  const global_listener = system.afterEvents.scriptEventReceive.subscribe(event => {
+    system.runJob(
+      (function* () {
+        const ids = event.id.split(':')
+        const namespace = yield* SERDE.decode(ids[0])
+        const sub_listeners = namespace_sub_listeners.get(namespace)
+        if (event.sourceType === ScriptEventSource.Server && sub_listeners) {
+          const payload = Payload.fromString(yield* SERDE.decode(ids[1]))
+          for (let i = 0; i < sub_listeners.length; i++) {
+            yield* sub_listeners[i](payload, event.message)
+          }
+        }
+      })()
+    )
+  })
+
   function create_listener(
     namespace: string,
     listener: (payload: Payload, data: string) => Generator<void, void, void>
@@ -474,22 +490,6 @@ export namespace NET {
       }
     }
   }
-
-  const global_listener = system.afterEvents.scriptEventReceive.subscribe(event => {
-    system.runJob(
-      (function* () {
-        const ids = event.id.split(':')
-        const namespace = yield* SERDE.decode(ids[0])
-        const sub_listeners = namespace_sub_listeners.get(namespace)
-        if (event.sourceType === ScriptEventSource.Server && sub_listeners) {
-          const payload = Payload.fromString(yield* SERDE.decode(ids[1]))
-          for (let i = 0; i < sub_listeners.length; i++) {
-            yield* sub_listeners[i](payload, event.message)
-          }
-        }
-      })()
-    )
-  })
 
   interface Payload {
     event: string
