@@ -24,6 +24,7 @@
  */
 
 import { world, system, ScriptEventSource } from '@minecraft/server'
+import { VoidFunctionComponent } from 'react'
 
 namespace IPC {
   export class Connection {
@@ -326,7 +327,7 @@ namespace IPC {
 
 export default IPC
 
-namespace SERDE {
+export namespace SERDE {
   const INVALID_START_CODES = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57]
   const INVALID_CODES = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
@@ -339,7 +340,7 @@ namespace SERDE {
 
   const BASE64 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-'
 
-  export function* b64_encode(char: string) {
+  function* b64_encode(char: string): Generator<void, string, void> {
     let encoded = ''
     for (let code = char.charCodeAt(0); code > 0; code = Math.floor(code / 64)) {
       encoded = BASE64[code % 64] + encoded
@@ -348,7 +349,7 @@ namespace SERDE {
     return encoded
   }
 
-  export function* b64_decode(enc: string) {
+  function* b64_decode(enc: string): Generator<void, string, void> {
     let code = 0
     for (let i = 0; i < enc.length; i++) {
       code += 64 ** (enc.length - 1 - i) * BASE64.indexOf(enc[i])
@@ -387,7 +388,7 @@ namespace SERDE {
   }
 }
 
-namespace CRYPTO {
+export namespace CRYPTO {
   export const PRIME: number = 19893121
   export const MOD: number = 341
 
