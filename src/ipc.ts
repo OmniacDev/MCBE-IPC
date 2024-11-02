@@ -563,8 +563,8 @@ export namespace NET {
             fragment = { size: -1, data_strs: [], data_size: 0 }
             buffer.set(p_id, fragment)
           }
-
-          fragment.size = p_final === 1 ? p_index + 1 : fragment.size
+          if (p_final === 1) fragment.size = p_index + 1
+          
           fragment.data_strs[p_index] = data
           fragment.data_size += p_index + 1
 
