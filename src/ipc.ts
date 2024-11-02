@@ -24,7 +24,6 @@
  */
 
 import { world, system, ScriptEventSource } from '@minecraft/server'
-import { VoidFunctionComponent } from 'react'
 
 namespace IPC {
   export class Connection {
