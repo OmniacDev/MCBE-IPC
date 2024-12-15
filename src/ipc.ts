@@ -29,15 +29,15 @@ namespace IPC {
   type SendTypes = {
     [channel: string]: any[]
   }
-  
+
   type InvokeTypes = {
     [channel: string]: any[]
   }
-  
+
   type HandleTypes = {
     [channel: string]: any
   }
-  
+
   export class Connection {
     private readonly _from: string
     private readonly _to: string
@@ -173,7 +173,11 @@ namespace IPC {
         const public_key = yield* CRYPTO.make_public(secret, args[4], args[3])
         const enc = args[1] === 1 || $._enc_force ? yield* CRYPTO.make_shared(secret, args[2], args[3]) : false
         $._enc_map.set(args[0], enc)
-        yield* NET.emit<[string, number, string]>('ipc', `${args[0]}:handshake:ACK`, [$._id, $._enc_force ? 1 : 0, public_key])
+        yield* NET.emit<[string, number, string]>('ipc', `${args[0]}:handshake:ACK`, [
+          $._id,
+          $._enc_force ? 1 : 0,
+          public_key
+        ])
       })
 
       NET.listen<[string]>('ipc', `${this._id}:terminate`, function* (args) {
@@ -194,7 +198,13 @@ namespace IPC {
           system.runJob(
             (function* () {
               const public_key = yield* CRYPTO.make_public(secret)
-              yield* NET.emit<[string, number, string, number, number]>('ipc', `${to}:handshake:SYN`, [$._id, enc_flag, public_key, CRYPTO.PRIME, CRYPTO.MOD])
+              yield* NET.emit<[string, number, string, number, number]>('ipc', `${to}:handshake:SYN`, [
+                $._id,
+                enc_flag,
+                public_key,
+                CRYPTO.PRIME,
+                CRYPTO.MOD
+              ])
             })()
           )
           function clear() {
@@ -301,7 +311,11 @@ namespace IPC {
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke<T extends InvokeTypes[C], R extends HandleTypes[C], C extends keyof (HandleTypes & InvokeTypes) = string>(channel: C, ...args: T): Promise<R> {
+  export function invoke<
+    T extends InvokeTypes[C],
+    R extends HandleTypes[C],
+    C extends keyof (HandleTypes & InvokeTypes) = string
+  >(channel: C, ...args: T): Promise<R> {
     system.runJob(NET.emit<T>('ipc', `${channel}:invoke`, args))
     return new Promise(resolve => {
       const terminate = NET.listen<[R]>('ipc', `${channel}:handle`, function* (args) {
@@ -312,14 +326,20 @@ namespace IPC {
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<T extends SendTypes[C], C extends keyof SendTypes = string>(channel: C, listener: (...args: T) => void) {
+  export function on<T extends SendTypes[C], C extends keyof SendTypes = string>(
+    channel: C,
+    listener: (...args: T) => void
+  ) {
     return NET.listen<T>('ipc', `${channel}:send`, function* (args) {
       listener(...args)
     })
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<T extends SendTypes[C], C extends keyof SendTypes = string>(channel: C, listener: (...args: T) => void) {
+  export function once<T extends SendTypes[C], C extends keyof SendTypes = string>(
+    channel: C,
+    listener: (...args: T) => void
+  ) {
     const terminate = NET.listen<T>('ipc', `${channel}:send`, function* (args) {
       listener(...args)
       terminate()
@@ -328,7 +348,11 @@ namespace IPC {
   }
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle<T extends InvokeTypes[C], R extends HandleTypes[C], C extends keyof (HandleTypes & InvokeTypes) = string>(channel: C, listener: (...args: T) => R) {
+  export function handle<
+    T extends InvokeTypes[C],
+    R extends HandleTypes[C],
+    C extends keyof (HandleTypes & InvokeTypes) = string
+  >(channel: C, listener: (...args: T) => R) {
     return NET.listen<T>('ipc', `${channel}:invoke`, function* (args) {
       const result = listener(...args)
       yield* NET.emit<[R]>('ipc', `${channel}:handle`, [result])
@@ -555,7 +579,11 @@ export namespace NET {
     yield* RUN(len === 0 ? [channel, id] : [channel, id, len, 1], str)
   }
 
-  export function listen<T = any[]>(namespace: string, channel: string, callback: (args: T) => Generator<void, void, void>) {
+  export function listen<T = any[]>(
+    namespace: string,
+    channel: string,
+    callback: (args: T) => Generator<void, void, void>
+  ) {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
     const listener = function* (
       [p_channel, p_id, p_index, p_final]: Payload,
