@@ -26,6 +26,18 @@
 import { world, system, ScriptEventSource } from '@minecraft/server'
 
 namespace IPC {
+  type SendTypes = {
+    [channel: string]: any[]
+  }
+  
+  type InvokeTypes = {
+    [channel: string]: any[]
+  }
+  
+  type HandleTypes = {
+    [channel: string]: any
+  }
+  
   export class Connection {
     private readonly _from: string
     private readonly _to: string
@@ -59,7 +71,7 @@ namespace IPC {
       $._terminators.forEach(terminate => terminate())
       $._terminators.length = 0
       if (notify) {
-        system.runJob(NET.emit('ipc', `${$._to}:terminate`, [$._from]))
+        system.runJob(NET.emit<[string]>('ipc', `${$._to}:terminate`, [$._from]))
       }
     }
 
@@ -156,15 +168,15 @@ namespace IPC {
       this._enc_map = new Map<string, string | false>()
       this._con_map = new Map<string, Connection>()
       this._enc_force = force_encryption
-      NET.listen('ipc', `${this._id}:handshake:SYN`, function* (args) {
+      NET.listen<[string, number, string, number, number]>('ipc', `${this._id}:handshake:SYN`, function* (args) {
         const secret = CRYPTO.make_secret(args[4])
         const public_key = yield* CRYPTO.make_public(secret, args[4], args[3])
         const enc = args[1] === 1 || $._enc_force ? yield* CRYPTO.make_shared(secret, args[2], args[3]) : false
         $._enc_map.set(args[0], enc)
-        yield* NET.emit('ipc', `${args[0]}:handshake:ACK`, [$._id, $._enc_force ? 1 : 0, public_key])
+        yield* NET.emit<[string, number, string]>('ipc', `${args[0]}:handshake:ACK`, [$._id, $._enc_force ? 1 : 0, public_key])
       })
 
-      NET.listen('ipc', `${this._id}:terminate`, function* (args) {
+      NET.listen<[string]>('ipc', `${this._id}:terminate`, function* (args) {
         $._enc_map.delete(args[0])
       })
     }
@@ -182,7 +194,7 @@ namespace IPC {
           system.runJob(
             (function* () {
               const public_key = yield* CRYPTO.make_public(secret)
-              yield* NET.emit('ipc', `${to}:handshake:SYN`, [$._id, enc_flag, public_key, CRYPTO.PRIME, CRYPTO.MOD])
+              yield* NET.emit<[string, number, string, number, number]>('ipc', `${to}:handshake:SYN`, [$._id, enc_flag, public_key, CRYPTO.PRIME, CRYPTO.MOD])
             })()
           )
           function clear() {
@@ -193,7 +205,7 @@ namespace IPC {
             reject()
             clear()
           }, timeout)
-          const terminate = NET.listen('ipc', `${this._id}:handshake:ACK`, function* (args) {
+          const terminate = NET.listen<[string, number, string]>('ipc', `${this._id}:handshake:ACK`, function* (args) {
             if (args[0] === to) {
               const enc = args[1] === 1 || encrypted ? yield* CRYPTO.make_shared(secret, args[2]) : false
               const new_con = new Connection($._id, to, enc)
@@ -284,15 +296,15 @@ namespace IPC {
   }
 
   /** Sends a message with `args` to `channel` */
-  export function send(channel: string, ...args: any[]): void {
+  export function send<T extends SendTypes[C], C extends keyof SendTypes = string>(channel: C, ...args: T): void {
     system.runJob(NET.emit('ipc', `${channel}:send`, args))
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke(channel: string, ...args: any[]): Promise<any> {
-    system.runJob(NET.emit('ipc', `${channel}:invoke`, args))
+  export function invoke<T extends InvokeTypes[C], R extends HandleTypes[C], C extends keyof (HandleTypes & InvokeTypes) = string>(channel: C, ...args: T): Promise<R> {
+    system.runJob(NET.emit<T>('ipc', `${channel}:invoke`, args))
     return new Promise(resolve => {
-      const terminate = NET.listen('ipc', `${channel}:handle`, function* (args) {
+      const terminate = NET.listen<[R]>('ipc', `${channel}:handle`, function* (args) {
         resolve(args[0])
         terminate()
       })
@@ -300,15 +312,15 @@ namespace IPC {
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on(channel: string, listener: (...args: any[]) => void) {
-    return NET.listen('ipc', `${channel}:send`, function* (args) {
+  export function on<T extends SendTypes[C], C extends keyof SendTypes = string>(channel: C, listener: (...args: T) => void) {
+    return NET.listen<T>('ipc', `${channel}:send`, function* (args) {
       listener(...args)
     })
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once(channel: string, listener: (...args: any[]) => void) {
-    const terminate = NET.listen('ipc', `${channel}:send`, function* (args) {
+  export function once<T extends SendTypes[C], C extends keyof SendTypes = string>(channel: C, listener: (...args: T) => void) {
+    const terminate = NET.listen<T>('ipc', `${channel}:send`, function* (args) {
       listener(...args)
       terminate()
     })
@@ -316,10 +328,10 @@ namespace IPC {
   }
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle(channel: string, listener: (...args: any[]) => any) {
-    return NET.listen('ipc', `${channel}:invoke`, function* (args) {
+  export function handle<T extends InvokeTypes[C], R extends HandleTypes[C], C extends keyof (HandleTypes & InvokeTypes) = string>(channel: C, listener: (...args: T) => R) {
+    return NET.listen<T>('ipc', `${channel}:invoke`, function* (args) {
       const result = listener(...args)
-      yield* NET.emit('ipc', `${channel}:handle`, [result])
+      yield* NET.emit<[R]>('ipc', `${channel}:handle`, [result])
     })
   }
 }
@@ -510,7 +522,7 @@ export namespace NET {
     ).toUpperCase()
   }
 
-  export function* emit(namespace: string, channel: string, args: any[]): Generator<void, void, void> {
+  export function* emit<T = any[]>(namespace: string, channel: string, args: T): Generator<void, void, void> {
     const id = generate_id()
     const enc_namespace = yield* SERDE.encode(namespace)
     const enc_args_str = yield* SERDE.encode(JSON.stringify(args))
@@ -543,7 +555,7 @@ export namespace NET {
     yield* RUN(len === 0 ? [channel, id] : [channel, id, len, 1], str)
   }
 
-  export function listen(namespace: string, channel: string, callback: (args: any[]) => Generator<void, void, void>) {
+  export function listen<T = any[]>(namespace: string, channel: string, callback: (args: T) => Generator<void, void, void>) {
     const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
     const listener = function* (
       [p_channel, p_id, p_index, p_final]: Payload,
