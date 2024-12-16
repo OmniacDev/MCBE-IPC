@@ -26,17 +26,9 @@
 import { world, system, ScriptEventSource } from '@minecraft/server'
 
 namespace IPC {
-  type SendTypes = {
-    [channel: string]: any[]
-  }
-
-  type InvokeTypes = {
-    [channel: string]: any[]
-  }
-
-  type HandleTypes = {
-    [channel: string]: any
-  }
+  type SendTypes = {}
+  type InvokeTypes = {}
+  type HandleTypes = {}
 
   export class Connection {
     private readonly _from: string
@@ -306,19 +298,29 @@ namespace IPC {
   }
 
   /** Sends a message with `args` to `channel` */
-  export function send<T extends SendTypes[C], C extends keyof SendTypes = string>(channel: C, ...args: T): void {
+  export function send<C extends keyof SendTypes>(channel: C, ...args: SendTypes[C]): void
+
+  /** Sends a message with `args` to `channel` */
+  export function send<T extends any[]>(channel: string, ...args: T): void
+
+  /** Sends a message with `args` to `channel` */
+  export function send(channel: string, ...args: any[]): void {
     system.runJob(NET.emit('ipc', `${channel}:send`, args))
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke<
-    T extends InvokeTypes[C],
-    R extends HandleTypes[C],
-    C extends keyof (HandleTypes & InvokeTypes) = string
-  >(channel: C, ...args: T): Promise<R> {
-    system.runJob(NET.emit<T>('ipc', `${channel}:invoke`, args))
+  export function invoke<C extends keyof (HandleTypes & InvokeTypes)>(
+    channel: C,
+    ...args: InvokeTypes[C]
+  ): Promise<HandleTypes[C]>
+
+  /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
+  export function invoke<T extends any[], R extends any>(channel: string, ...args: T): Promise<R>
+
+  export function invoke(channel: string, ...args: any[]): Promise<any> {
+    system.runJob(NET.emit('ipc', `${channel}:invoke`, args))
     return new Promise(resolve => {
-      const terminate = NET.listen<[R]>('ipc', `${channel}:handle`, function* (args) {
+      const terminate = NET.listen('ipc', `${channel}:handle`, function* (args) {
         resolve(args[0])
         terminate()
       })
@@ -326,21 +328,27 @@ namespace IPC {
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<T extends SendTypes[C], C extends keyof SendTypes = string>(
-    channel: C,
-    listener: (...args: T) => void
-  ) {
-    return NET.listen<T>('ipc', `${channel}:send`, function* (args) {
+  export function on<C extends keyof SendTypes>(channel: C, listener: (...args: SendTypes[C]) => void): () => void
+
+  /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
+  export function on<T extends any[]>(channel: string, listener: (...args: T) => void): () => void
+
+  /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
+  export function on(channel: string, listener: (...args: any[]) => void): () => void {
+    return NET.listen('ipc', `${channel}:send`, function* (args) {
       listener(...args)
     })
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<T extends SendTypes[C], C extends keyof SendTypes = string>(
-    channel: C,
-    listener: (...args: T) => void
-  ) {
-    const terminate = NET.listen<T>('ipc', `${channel}:send`, function* (args) {
+  export function once<C extends keyof SendTypes>(channel: C, listener: (...args: SendTypes[C]) => void): () => void
+
+  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
+  export function once<T extends any[]>(channel: string, listener: (...args: T) => void): () => void
+
+  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
+  export function once(channel: string, listener: (...args: any[]) => void) {
+    const terminate = NET.listen('ipc', `${channel}:send`, function* (args) {
       listener(...args)
       terminate()
     })
@@ -348,14 +356,19 @@ namespace IPC {
   }
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle<
-    T extends InvokeTypes[C],
-    R extends HandleTypes[C],
-    C extends keyof (HandleTypes & InvokeTypes) = string
-  >(channel: C, listener: (...args: T) => R) {
-    return NET.listen<T>('ipc', `${channel}:invoke`, function* (args) {
+  export function handle<C extends keyof (HandleTypes & InvokeTypes)>(
+    channel: C,
+    listener: (...args: InvokeTypes[C]) => HandleTypes[C]
+  ): () => void
+
+  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
+  export function handle<T extends any[], R extends any>(channel: string, listener: (...args: T) => R): () => void
+
+  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
+  export function handle(channel: string, listener: (...args: any[]) => any): () => void {
+    return NET.listen('ipc', `${channel}:invoke`, function* (args) {
       const result = listener(...args)
-      yield* NET.emit<[R]>('ipc', `${channel}:handle`, [result])
+      yield* NET.emit('ipc', `${channel}:handle`, [result])
     })
   }
 }
