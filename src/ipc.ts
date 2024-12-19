@@ -321,7 +321,7 @@ namespace IPC {
     system.runJob(NET.emit('ipc', `${channel}:invoke`, args))
     return new Promise(resolve => {
       const terminate = NET.listen('ipc', `${channel}:handle`, function* (args) {
-        resolve(args[0])
+        resolve(args)
         terminate()
       })
     })
@@ -348,7 +348,7 @@ namespace IPC {
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
   export function once(channel: string, listener: (...args: any[]) => void) {
-    const terminate = NET.listen('ipc', `${channel}:send`, function* (args) {
+    const terminate = NET.listen<any[]>('ipc', `${channel}:send`, function* (args) {
       listener(...args)
       terminate()
     })
@@ -366,9 +366,9 @@ namespace IPC {
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
   export function handle(channel: string, listener: (...args: any[]) => any): () => void {
-    return NET.listen('ipc', `${channel}:invoke`, function* (args) {
+    return NET.listen<any[]>('ipc', `${channel}:invoke`, function* (args) {
       const result = listener(...args)
-      yield* NET.emit('ipc', `${channel}:handle`, [result])
+      yield* NET.emit('ipc', `${channel}:handle`, result)
     })
   }
 }
@@ -559,7 +559,7 @@ export namespace NET {
     ).toUpperCase()
   }
 
-  export function* emit<T = any[]>(namespace: string, channel: string, args: T): Generator<void, void, void> {
+  export function* emit<T = any>(namespace: string, channel: string, args: T): Generator<void, void, void> {
     const id = generate_id()
     const enc_namespace = yield* SERDE.encode(namespace)
     const enc_args_str = yield* SERDE.encode(JSON.stringify(args))
@@ -592,7 +592,7 @@ export namespace NET {
     yield* RUN(len === 0 ? [channel, id] : [channel, id, len, 1], str)
   }
 
-  export function listen<T = any[]>(
+  export function listen<T = any>(
     namespace: string,
     channel: string,
     callback: (args: T) => Generator<void, void, void>
