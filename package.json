@@ -1,12 +1,26 @@
 {
   "name": "mcbe-ipc",
   "author": "OmniacDev",
-  "description": "Experimental IPC system for MCBE Script API projects",
+  "description": "IPC system for MCBE Script API projects",
   "license": "MIT",
-  "version": "1.7.0",
+  "version": "2.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OmniacDev/mcbe-ipc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OmniacDev/mcbe-ipc/issues"
+  },
+  "homepage": "https://github.com/OmniacDev/mcbe-ipc",
+  "type": "module",
+  "main": "dist/ipc.js",
+  "types": "dist/ipc.d.ts",
+  "files": ["dist"],
   "scripts": {
     "build": "tsc && uglifyjs dist/ipc.js --mangle --compress --output dist/ipc.min.js",
-    "format": "prettier --write src"
+    "format": "prettier --write src",
+    "build-clean": "tsc",
+    "prepublishOnly": "npm run build-clean"
   },
   "devDependencies": {
     "prettier": "^3.3.3",
