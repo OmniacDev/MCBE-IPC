@@ -23,7 +23,7 @@
  * SOFTWARE.
  */
 
-import { world, system, ScriptEventSource } from '@minecraft/server'
+import { ScriptEventSource, system, world } from '@minecraft/server'
 
 namespace IPC {
   type SendTypes = {}
@@ -374,6 +374,190 @@ namespace IPC {
 }
 
 export default IPC
+
+namespace SERDE_BINARY {
+  export class ByteArray {
+    private _buffer: Uint8Array
+    private _length: number
+
+    constructor(size: number = 256) {
+      this._buffer = new Uint8Array(size)
+      this._length = 0
+    }
+
+    write(...values: number[]) {
+      this._ensure_capacity(this._length + values.length)
+      this._buffer.set(values, this._length)
+      this._length += values.length
+    }
+
+    read(): number | undefined {
+      if (this._length === 0) return undefined
+      return this._buffer[--this._length]
+    }
+
+    write_start(...values: number[]) {
+      this._ensure_capacity(this._length + values.length)
+      this._buffer.set(this._buffer.subarray(0, this._length), values.length)
+      this._buffer.set(values, 0)
+      this._length += values.length
+    }
+
+    read_start(): number | undefined {
+      if (this._length === 0) return undefined
+      const value = this._buffer[0];
+      this._buffer.set(this._buffer.subarray(1, this._length));
+      this._length--;
+      return value;
+    }
+
+    private _ensure_capacity(size: number) {
+      if (size > this._buffer.length) {
+        const larger_buffer = new Uint8Array(size * 2)
+        larger_buffer.set(this._buffer)
+        this._buffer = larger_buffer
+      }
+    }
+
+    static from_uint8array(array: Uint8Array) {
+      const byte_array = new ByteArray()
+      byte_array._buffer = array
+      byte_array._length = array.length
+      return byte_array
+    }
+
+    to_uint8array() {
+      return this._buffer.subarray(0, this._length)
+    }
+  }
+
+  interface Serializable<T> {
+    serialize(value: T, stream: ByteArray): void,
+    deserialize(stream: ByteArray): T,
+  }
+
+  export class Proto {
+    static VarInt: Serializable<number> = {
+      serialize(value, stream) {
+        while (value >= 0x80) {
+          stream.write((value & 0x7F) | 0x80)
+          value >>= 7
+        }
+        stream.write(value)
+
+      },
+      deserialize(stream) {
+        let value = 0
+        let shift = 0
+        let byte
+        do {
+          byte = stream.read()!
+          value |= (byte & 0x7f) << shift
+          shift += 7
+        } while (byte & 0x80)
+        return value
+      }
+    }
+    static String: Serializable<string> = {
+      serialize(value, stream) {
+        Proto.VarInt.serialize(value.length, stream)
+        for (let i = 0; i < value.length; i++) {
+          const code = value.charCodeAt(i)
+          Proto.VarInt.serialize(code, stream)
+        }
+      },
+      deserialize(stream) {
+        const length = Proto.VarInt.deserialize(stream)
+        let value = ''
+        for (let i = 0; i < length; i++) {
+          const code = Proto.VarInt.deserialize(stream)
+          value += String.fromCharCode(code)
+        }
+        return value
+      },
+    }
+    static Boolean: Serializable<boolean> = {
+      serialize(value, stream) {
+        stream.write(value ? 1 : 0)
+      },
+      deserialize(stream) {
+        const value = stream.read()!
+        return value === 1
+      }
+    }
+    static Object<T extends object>(obj: { [K in keyof T]: Serializable<T[K]> }): Serializable<T> {
+      return {
+        serialize(value, stream) {
+          for (const key in value) {
+            if (obj.hasOwnProperty(key)) {
+              obj[key].serialize(value[key], stream)
+            }
+          }
+        },
+        deserialize(stream) {
+          const result: Partial<T> = {}
+          for (const key in obj) {
+            result[key] = obj[key].deserialize(stream)
+          }
+          return result as T
+        }
+      }
+    }
+    static Array<T>(items: Serializable<T>): Serializable<T[]> {
+      return {
+        serialize(value, stream) {
+          Proto.VarInt.serialize(value.length, stream)
+          for (const item of value) {
+            items.serialize(item, stream)
+          }
+        },
+        deserialize(stream) {
+          const result: T[] = []
+          const length = Proto.VarInt.deserialize(stream)
+          for (let i = 0; i < length; i++) {
+            result[i] = items.deserialize(stream)
+          }
+          return result
+        }
+      }
+    }
+    static Tuple<T extends any[]>(...items: { [K in keyof T]: Serializable<T[K]> }): Serializable<T> {
+      return {
+        serialize(value, stream) {
+          for (let i = 0; i < items.length; i++) {
+            items[i].serialize(value[i], stream)
+          }
+        },
+        deserialize(stream) {
+          const result: any[] = []
+          for (let i = 0; i < items.length; i++) {
+            result[i] = items[i].deserialize(stream)
+          }
+          return result as T
+        }
+      }
+    }
+  }
+
+  export function uint8array_to_string(uint8array: Uint8Array): string {
+    let utf16_string = '';
+    for (let i = 0; i < uint8array.length; i++) {
+      const charCode = ((uint8array[i] << 8) | uint8array[++i]);
+      utf16_string += String.fromCharCode(charCode);
+    }
+    return utf16_string;
+  }
+
+  export function string_to_uint8array(utf16_string: string): Uint8Array {
+    const uint8array = new Uint8Array(utf16_string.length * 2)
+    for (let i = 0; i < utf16_string.length; i++) {
+      const charCode = utf16_string.charCodeAt(i)
+      uint8array[2 * i] = charCode >> 8
+      uint8array[2 * i + 1] = charCode & 0xff
+    }
+    return uint8array
+  }
+}
 
 namespace SERDE {
   const INVALID_START_CODES = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57]
