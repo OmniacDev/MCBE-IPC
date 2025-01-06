@@ -405,10 +405,10 @@ namespace SERDE_BINARY {
 
     read_start(): number | undefined {
       if (this._length === 0) return undefined
-      const value = this._buffer[0];
-      this._buffer.set(this._buffer.subarray(1, this._length));
-      this._length--;
-      return value;
+      const value = this._buffer[0]
+      this._buffer.set(this._buffer.subarray(1, this._length))
+      this._length--
+      return value
     }
 
     private _ensure_capacity(size: number) {
@@ -432,19 +432,18 @@ namespace SERDE_BINARY {
   }
 
   interface Serializable<T> {
-    serialize(value: T, stream: ByteArray): void,
-    deserialize(stream: ByteArray): T,
+    serialize(value: T, stream: ByteArray): void
+    deserialize(stream: ByteArray): T
   }
 
   export class Proto {
     static VarInt: Serializable<number> = {
       serialize(value, stream) {
         while (value >= 0x80) {
-          stream.write((value & 0x7F) | 0x80)
+          stream.write((value & 0x7f) | 0x80)
           value >>= 7
         }
         stream.write(value)
-
       },
       deserialize(stream) {
         let value = 0
@@ -474,7 +473,7 @@ namespace SERDE_BINARY {
           value += String.fromCharCode(code)
         }
         return value
-      },
+      }
     }
     static Boolean: Serializable<boolean> = {
       serialize(value, stream) {
@@ -540,12 +539,12 @@ namespace SERDE_BINARY {
   }
 
   export function uint8array_to_string(uint8array: Uint8Array): string {
-    let utf16_string = '';
+    let utf16_string = ''
     for (let i = 0; i < uint8array.length; i++) {
-      const charCode = ((uint8array[i] << 8) | uint8array[++i]);
-      utf16_string += String.fromCharCode(charCode);
+      const charCode = (uint8array[i] << 8) | uint8array[++i]
+      utf16_string += String.fromCharCode(charCode)
     }
-    return utf16_string;
+    return utf16_string
   }
 
   export function string_to_uint8array(utf16_string: string): Uint8Array {
