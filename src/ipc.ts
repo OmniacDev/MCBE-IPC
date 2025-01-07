@@ -507,14 +507,14 @@ export namespace NET {
       (function* () {
         const ids = event.id.split(':')
 
-        const namespace_stream = ByteArray.from_uint8array(SERDE_BINARY.string_to_uint8array(ids[0]))
+        const namespace_stream = ByteArray.from_uint8array(SERDE_BINARY.string_to_uint8array(ids[0]).reverse())
         const namespace = SERDE_BINARY.Proto.String.deserialize(namespace_stream)
         const listeners = namespace_listeners.get(namespace)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
-          const bytes = SERDE_BINARY.string_to_uint8array(ids[1])
+          const bytes = SERDE_BINARY.string_to_uint8array(ids[1]).reverse()
           const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
           const payload = Payload.deserialize(stream)
-          const packet = SERDE_BINARY.string_to_uint8array(event.message)
+          const packet = SERDE_BINARY.string_to_uint8array(event.message).reverse()
           for (let i = 0; i < listeners.length; i++) {
             yield* listeners[i](payload, packet)
           }
