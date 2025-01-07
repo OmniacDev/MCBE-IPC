@@ -25,378 +25,32 @@
 
 import { ScriptEventSource, system, world } from '@minecraft/server'
 
-namespace IPC {
-  type SendTypes = {}
-  type InvokeTypes = {}
-  type HandleTypes = {}
-
-  export class Connection {
-    private readonly _from: string
-    private readonly _to: string
-    private readonly _enc: string | false
-    private readonly _terminators: Array<() => void>
-
-    private *MAYBE_ENCRYPT(args: any[]): Generator<void, any, void> {
-      return this._enc !== false ? yield* CRYPTO.encrypt(JSON.stringify(args), this._enc) : args
-    }
-    private *MAYBE_DECRYPT(args: any[]): Generator<void, any, void> {
-      return this._enc !== false ? JSON.parse(yield* CRYPTO.decrypt(args[1] as string, this._enc)) : args[1]
-    }
-
-    get from() {
-      return this._from
-    }
-
-    get to() {
-      return this._to
-    }
-
-    constructor(from: string, to: string, encryption: string | false) {
-      this._from = from
-      this._to = to
-      this._enc = encryption
-      this._terminators = new Array<() => void>()
-    }
-
-    terminate(notify: boolean = true) {
-      const $ = this
-      $._terminators.forEach(terminate => terminate())
-      $._terminators.length = 0
-      if (notify) {
-        system.runJob(NET.emit<[string]>('ipc', `${$._to}:terminate`, [$._from]))
-      }
-    }
-
-    send<T extends any[]>(channel: string, ...args: T): void {
-      const $ = this
-      system.runJob(
-        (function* () {
-          const data = yield* $.MAYBE_ENCRYPT(args)
-          yield* NET.emit('ipc', `${$._to}:${channel}:send`, [$._from, data])
-        })()
-      )
-    }
-
-    invoke<T extends any[], R extends any>(channel: string, ...args: T): Promise<R> {
-      const $ = this
-      system.runJob(
-        (function* () {
-          const data = yield* $.MAYBE_ENCRYPT(args)
-          yield* NET.emit('ipc', `${$._to}:${channel}:invoke`, [$._from, data])
-        })()
-      )
-
-      return new Promise(resolve => {
-        const terminate = NET.listen('ipc', `${$._from}:${channel}:handle`, function* (args) {
-          if (args[0] === $._to) {
-            const data = yield* $.MAYBE_DECRYPT(args)
-            resolve(data)
-            terminate()
-          }
-        })
-      })
-    }
-
-    on<T extends any[]>(channel: string, listener: (...args: T) => void) {
-      const $ = this
-      const terminate = NET.listen('ipc', `${$._from}:${channel}:send`, function* (args) {
-        if (args[0] === $._to) {
-          const data = yield* $.MAYBE_DECRYPT(args)
-          listener(...data)
-        }
-      })
-      $._terminators.push(terminate)
-      return terminate
-    }
-
-    once<T extends any[]>(channel: string, listener: (...args: T) => void) {
-      const $ = this
-      const terminate = NET.listen('ipc', `${$._from}:${channel}:send`, function* (args) {
-        if (args[0] === $._to) {
-          const data = yield* $.MAYBE_DECRYPT(args)
-          listener(...data)
-          terminate()
-        }
-      })
-      $._terminators.push(terminate)
-      return terminate
-    }
-
-    handle<T extends any[], R extends any>(channel: string, listener: (...args: T) => R) {
-      const $ = this
-      const terminate = NET.listen('ipc', `${$._from}:${channel}:invoke`, function* (args) {
-        if (args[0] === $._to) {
-          const data = yield* $.MAYBE_DECRYPT(args)
-          const result = listener(...data)
-          const return_data = yield* $.MAYBE_ENCRYPT([result])
-          yield* NET.emit('ipc', `${$._to}:${channel}:handle`, [$._from, return_data])
-        }
-      })
-      $._terminators.push(terminate)
-      return terminate
-    }
-  }
-
-  export class ConnectionManager {
-    private readonly _id: string
-    private readonly _enc_map: Map<string, string | false>
-    private readonly _con_map: Map<string, Connection>
-    private readonly _enc_force: boolean
-
-    private *MAYBE_ENCRYPT(args: any[], encryption: string | false): Generator<void, any, void> {
-      return encryption !== false ? yield* CRYPTO.encrypt(JSON.stringify(args), encryption) : args
-    }
-    private *MAYBE_DECRYPT(args: any[], encryption: string | false): Generator<void, any, void> {
-      return encryption !== false ? JSON.parse(yield* CRYPTO.decrypt(args[1] as string, encryption)) : args[1]
-    }
-
-    get id() {
-      return this._id
-    }
-
-    constructor(id: string, force_encryption: boolean = false) {
-      const $ = this
-      this._id = id
-      this._enc_map = new Map<string, string | false>()
-      this._con_map = new Map<string, Connection>()
-      this._enc_force = force_encryption
-      NET.listen<[string, number, string, number, number]>('ipc', `${this._id}:handshake:SYN`, function* (args) {
-        const secret = CRYPTO.make_secret(args[4])
-        const public_key = yield* CRYPTO.make_public(secret, args[4], args[3])
-        const enc = args[1] === 1 || $._enc_force ? yield* CRYPTO.make_shared(secret, args[2], args[3]) : false
-        $._enc_map.set(args[0], enc)
-        yield* NET.emit<[string, number, string]>('ipc', `${args[0]}:handshake:ACK`, [
-          $._id,
-          $._enc_force ? 1 : 0,
-          public_key
-        ])
-      })
-
-      NET.listen<[string]>('ipc', `${this._id}:terminate`, function* (args) {
-        $._enc_map.delete(args[0])
-      })
-    }
-
-    connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
-      const $ = this
-      return new Promise((resolve, reject) => {
-        const con = this._con_map.get(to)
-        if (con !== undefined) {
-          con.terminate(false)
-          resolve(con)
-        } else {
-          const secret = CRYPTO.make_secret()
-          const enc_flag = encrypted ? 1 : 0
-          system.runJob(
-            (function* () {
-              const public_key = yield* CRYPTO.make_public(secret)
-              yield* NET.emit<[string, number, string, number, number]>('ipc', `${to}:handshake:SYN`, [
-                $._id,
-                enc_flag,
-                public_key,
-                CRYPTO.PRIME,
-                CRYPTO.MOD
-              ])
-            })()
-          )
-          function clear() {
-            terminate()
-            system.clearRun(timeout_handle)
-          }
-          const timeout_handle = system.runTimeout(() => {
-            reject()
-            clear()
-          }, timeout)
-          const terminate = NET.listen<[string, number, string]>('ipc', `${this._id}:handshake:ACK`, function* (args) {
-            if (args[0] === to) {
-              const enc = args[1] === 1 || encrypted ? yield* CRYPTO.make_shared(secret, args[2]) : false
-              const new_con = new Connection($._id, to, enc)
-              $._con_map.set(to, new_con)
-              resolve(new_con)
-              clear()
-            }
-          })
-        }
-      })
-    }
-
-    send<T extends any[]>(channel: string, ...args: T): void {
-      const $ = this
-      system.runJob(
-        (function* () {
-          for (const [key, value] of $._enc_map) {
-            const data = yield* $.MAYBE_ENCRYPT(args, value)
-            yield* NET.emit('ipc', `${key}:${channel}:send`, [$._id, data])
-          }
-        })()
-      )
-    }
-
-    invoke<T extends any[], R extends any>(channel: string, ...args: T): Promise<R>[] {
-      const $ = this
-      const promises: Promise<any>[] = []
-
-      for (const [key, value] of $._enc_map) {
-        system.runJob(
-          (function* () {
-            const data = yield* $.MAYBE_ENCRYPT(args, value)
-            yield* NET.emit('ipc', `${key}:${channel}:invoke`, [$._id, data])
-          })()
-        )
-
-        promises.push(
-          new Promise(resolve => {
-            const terminate = NET.listen('ipc', `${$._id}:${channel}:handle`, function* (args) {
-              if (args[0] === key) {
-                const data = yield* $.MAYBE_DECRYPT(args, value)
-                resolve(data)
-                terminate()
-              }
-            })
-          })
-        )
-      }
-      return promises
-    }
-
-    on<T extends any[]>(channel: string, listener: (...args: T) => void) {
-      const $ = this
-      return NET.listen('ipc', `${$._id}:${channel}:send`, function* (args) {
-        const enc = $._enc_map.get(args[0]) as string | false
-        if (enc !== undefined) {
-          const data = yield* $.MAYBE_DECRYPT(args, enc)
-          listener(...data)
-        }
-      })
-    }
-
-    once<T extends any[]>(channel: string, listener: (...args: T) => void) {
-      const $ = this
-      const terminate = NET.listen('ipc', `${$._id}:${channel}:send`, function* (args) {
-        const enc = $._enc_map.get(args[0]) as string | false
-        if (enc !== undefined) {
-          const data = yield* $.MAYBE_DECRYPT(args, enc)
-          listener(...data)
-          terminate()
-        }
-      })
-      return terminate
-    }
-
-    handle<T extends any[], R extends any>(channel: string, listener: (...args: T) => R) {
-      const $ = this
-      return NET.listen('ipc', `${$._id}:${channel}:invoke`, function* (args) {
-        const enc = $._enc_map.get(args[0]) as string | false
-        if (enc !== undefined) {
-          const data = yield* $.MAYBE_DECRYPT(args, enc)
-          const result = listener(...data)
-          const return_data = yield* $.MAYBE_ENCRYPT([result], enc)
-          yield* NET.emit('ipc', `${args[0]}:${channel}:handle`, [$._id, return_data])
-        }
-      })
-    }
-  }
-
-  /** Sends a message with `args` to `channel` */
-  export function send<C extends keyof SendTypes>(channel: C, ...args: SendTypes[C]): void
-
-  /** Sends a message with `args` to `channel` */
-  export function send<T extends any[]>(channel: string, ...args: T): void
-
-  /** Sends a message with `args` to `channel` */
-  export function send(channel: string, ...args: any[]): void {
-    system.runJob(NET.emit('ipc', `${channel}:send`, args))
-  }
-
-  /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke<C extends keyof (HandleTypes & InvokeTypes)>(
-    channel: C,
-    ...args: InvokeTypes[C]
-  ): Promise<HandleTypes[C]>
-
-  /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke<T extends any[], R extends any>(channel: string, ...args: T): Promise<R>
-
-  export function invoke(channel: string, ...args: any[]): Promise<any> {
-    system.runJob(NET.emit('ipc', `${channel}:invoke`, args))
-    return new Promise(resolve => {
-      const terminate = NET.listen('ipc', `${channel}:handle`, function* (args) {
-        resolve(args)
-        terminate()
-      })
-    })
-  }
-
-  /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<C extends keyof SendTypes>(channel: C, listener: (...args: SendTypes[C]) => void): () => void
-
-  /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<T extends any[]>(channel: string, listener: (...args: T) => void): () => void
-
-  /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on(channel: string, listener: (...args: any[]) => void): () => void {
-    return NET.listen('ipc', `${channel}:send`, function* (args) {
-      listener(...args)
-    })
-  }
-
-  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<C extends keyof SendTypes>(channel: C, listener: (...args: SendTypes[C]) => void): () => void
-
-  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<T extends any[]>(channel: string, listener: (...args: T) => void): () => void
-
-  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once(channel: string, listener: (...args: any[]) => void) {
-    const terminate = NET.listen<any[]>('ipc', `${channel}:send`, function* (args) {
-      listener(...args)
-      terminate()
-    })
-    return terminate
-  }
-
-  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle<C extends keyof (HandleTypes & InvokeTypes)>(
-    channel: C,
-    listener: (...args: InvokeTypes[C]) => HandleTypes[C]
-  ): () => void
-
-  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle<T extends any[], R extends any>(channel: string, listener: (...args: T) => R): () => void
-
-  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle(channel: string, listener: (...args: any[]) => any): () => void {
-    return NET.listen<any[]>('ipc', `${channel}:invoke`, function* (args) {
-      const result = listener(...args)
-      yield* NET.emit('ipc', `${channel}:handle`, result)
-    })
-  }
-}
-
-export default IPC
-
 namespace SERDE_BINARY {
   export class ByteArray {
     private _buffer: Uint8Array
+    private _data_view: DataView
     private _length: number
 
     constructor(size: number = 256) {
       this._buffer = new Uint8Array(size)
+      this._data_view = new DataView(this._buffer.buffer)
       this._length = 0
     }
 
-    write(...values: number[]) {
+    write(...values: number[]): void {
       this._ensure_capacity(this._length + values.length)
       this._buffer.set(values, this._length)
       this._length += values.length
     }
 
-    read(): number | undefined {
-      if (this._length === 0) return undefined
-      return this._buffer[--this._length]
+    read(amount: number = 1): number[] {
+      if (this._length === 0) return []
+      const values = this._buffer.subarray(this._length - amount, this._length).reverse()
+      this._length -= amount
+      return Array.from(values)
     }
 
-    write_start(...values: number[]) {
+    write_start(...values: number[]): void {
       this._ensure_capacity(this._length + values.length)
       this._buffer.set(this._buffer.subarray(0, this._length), values.length)
       this._buffer.set(values, 0)
@@ -411,11 +65,118 @@ namespace SERDE_BINARY {
       return value
     }
 
+    write_uint8(value: number): void {
+      this._ensure_capacity(this._length + 1)
+      this._data_view.setUint8(this._length, value)
+      this._length += 1
+    }
+
+    read_uint8(): number | undefined {
+      if (this._length < 1) return undefined
+      return this._data_view.getUint8(--this._length)
+    }
+
+    write_uint16(value: number): void {
+      this._ensure_capacity(this._length + 2)
+      this._data_view.setUint16(this._length, value)
+      this._length += 2
+    }
+
+    read_uint16(): number | undefined {
+      if (this._length < 2) return undefined
+      const bytes = new Uint8Array(this._buffer.subarray(this._length - 2, this._length)).reverse()
+      const value = new DataView(bytes.buffer).getUint16(0)
+      this._length -= 2
+      return value
+    }
+
+    write_uint32(value: number): void {
+      this._ensure_capacity(this._length + 4)
+      this._data_view.setUint32(this._length, value)
+      this._length += 4
+    }
+
+    read_uint32(): number | undefined {
+      if (this._length < 4) return undefined
+      const bytes = new Uint8Array(this._buffer.subarray(this._length - 4, this._length)).reverse()
+      const value = new DataView(bytes.buffer).getUint32(0)
+      this._length -= 4
+      return value
+    }
+
+    write_int8(value: number): void {
+      this._ensure_capacity(this._length + 1)
+      this._data_view.setInt8(this._length, value)
+      this._length += 1
+    }
+
+    read_int8(): number | undefined {
+      if (this._length < 1) return undefined
+      return this._data_view.getInt8(--this._length)
+    }
+
+    write_int16(value: number): void {
+      this._ensure_capacity(this._length + 2)
+      this._data_view.setInt16(this._length, value)
+      this._length += 2
+    }
+
+    read_int16(): number | undefined {
+      if (this._length < 2) return undefined
+      const bytes = new Uint8Array(this._buffer.subarray(this._length - 2, this._length)).reverse()
+      const value = new DataView(bytes.buffer).getInt16(0)
+      this._length -= 2
+      return value
+    }
+
+    write_int32(value: number): void {
+      this._ensure_capacity(this._length + 4)
+      this._data_view.setInt32(this._length, value)
+      this._length += 4
+    }
+
+    read_int32(): number | undefined {
+      if (this._length < 4) return undefined
+      const bytes = new Uint8Array(this._buffer.subarray(this._length - 4, this._length)).reverse()
+      const value = new DataView(bytes.buffer).getInt32(0)
+      this._length -= 4
+      return value
+    }
+
+    write_f32(value: number): void {
+      this._ensure_capacity(this._length + 4)
+      this._data_view.setFloat32(this._length, value)
+      this._length += 4
+    }
+
+    read_f32(): number | undefined {
+      if (this._length < 4) return undefined
+      const bytes = new Uint8Array(this._buffer.subarray(this._length - 4, this._length)).reverse()
+      const value = new DataView(bytes.buffer).getFloat32(0)
+      this._length -= 4
+      return value
+    }
+
+    write_f64(value: number): void {
+      this._ensure_capacity(this._length + 8)
+      this._data_view.setFloat64(this._length, value)
+      this._length += 8
+    }
+
+    read_f64(): number | undefined {
+      if (this._length < 8) return undefined
+      const bytes = new Uint8Array(this._buffer.subarray(this._length - 8, this._length)).reverse()
+      const value = new DataView(bytes.buffer).getFloat64(0)
+      this._length -= 8
+      return value
+    }
+
     private _ensure_capacity(size: number) {
       if (size > this._buffer.length) {
         const larger_buffer = new Uint8Array(size * 2)
         larger_buffer.set(this._buffer)
         this._buffer = larger_buffer
+        this._data_view = new DataView(this._buffer.buffer)
       }
     }
 
@@ -423,6 +184,7 @@ namespace SERDE_BINARY {
       const byte_array = new ByteArray()
       byte_array._buffer = array
       byte_array._length = array.length
+      byte_array._data_view = new DataView(array.buffer)
       return byte_array
     }
 
@@ -431,12 +193,76 @@ namespace SERDE_BINARY {
     }
   }
 
-  interface Serializable<T> {
+  export interface Serializable<T = any> {
     serialize(value: T, stream: ByteArray): void
     deserialize(stream: ByteArray): T
   }
 
   export class Proto {
+    static Int8: Serializable<number> = {
+      serialize(value, stream) {
+        stream.write_int8(value)
+      },
+      deserialize(stream) {
+        return stream.read_int8()!
+      }
+    }
+    static Int16: Serializable<number> = {
+      serialize(value, stream) {
+        stream.write_int16(value)
+      },
+      deserialize(stream) {
+        return stream.read_int16()!
+      }
+    }
+    static Int32: Serializable<number> = {
+      serialize(value, stream) {
+        stream.write_int32(value)
+      },
+      deserialize(stream) {
+        return stream.read_int32()!
+      }
+    }
+    static UInt8: Serializable<number> = {
+      serialize(value, stream) {
+        stream.write_uint8(value)
+      },
+      deserialize(stream) {
+        return stream.read_uint8()!
+      }
+    }
+    static UInt16: Serializable<number> = {
+      serialize(value, stream) {
+        stream.write_uint16(value)
+      },
+      deserialize(stream) {
+        return stream.read_uint16()!
+      }
+    }
+    static UInt32: Serializable<number> = {
+      serialize(value, stream) {
+        stream.write_uint32(value)
+      },
+      deserialize(stream) {
+        return stream.read_uint32()!
+      }
+    }
+    static Float32: Serializable<number> = {
+      serialize(value, stream) {
+        stream.write_f32(value)
+      },
+      deserialize(stream) {
+        return stream.read_f32()!
+      }
+    }
+    static Float64: Serializable<number> = {
+      serialize(value, stream) {
+        stream.write_f64(value)
+      },
+      deserialize(stream) {
+        return stream.read_f64()!
+      }
+    }
     static VarInt: Serializable<number> = {
       serialize(value, stream) {
         while (value >= 0x80) {
@@ -450,7 +276,7 @@ namespace SERDE_BINARY {
         let shift = 0
         let byte
         do {
-          byte = stream.read()!
+          byte = stream.read()[0]!
           value |= (byte & 0x7f) << shift
           shift += 7
         } while (byte & 0x80)
@@ -480,8 +306,24 @@ namespace SERDE_BINARY {
         stream.write(value ? 1 : 0)
       },
       deserialize(stream) {
-        const value = stream.read()!
+        const value = stream.read()[0]!
         return value === 1
+      }
+    }
+    static UInt8Array: Serializable<Uint8Array> = {
+      serialize(value: Uint8Array, stream: SERDE_BINARY.ByteArray) {
+        Proto.VarInt.serialize(value.length, stream)
+        for (const item of value) {
+          stream.write_uint8(item)
+        }
+      },
+      deserialize(stream: SERDE_BINARY.ByteArray): Uint8Array {
+        const length = Proto.VarInt.deserialize(stream)
+        const result = new Uint8Array(length)
+        for (let i = 0; i < length; i++) {
+          result[i] = stream.read_uint8()!
+        }
+        return result
       }
     }
     static Object<T extends object>(obj: { [K in keyof T]: Serializable<T[K]> }): Serializable<T> {
@@ -536,86 +378,47 @@ namespace SERDE_BINARY {
         }
       }
     }
+    static Optional<T>(item: Serializable<T>): Serializable<T | undefined> {
+      return {
+        serialize(value, stream) {
+          Proto.Boolean.serialize(value !== undefined, stream)
+          if (value !== undefined) {
+            item.serialize(value, stream)
+          }
+        },
+        deserialize(stream) {
+          const defined = Proto.Boolean.deserialize(stream)
+          if (defined) {
+            return item.deserialize(stream)
+          }
+        }
+      }
+    }
   }
 
   export function uint8array_to_string(uint8array: Uint8Array): string {
     let utf16_string = ''
     for (let i = 0; i < uint8array.length; i++) {
-      const charCode = (uint8array[i] << 8) | uint8array[++i]
-      utf16_string += String.fromCharCode(charCode)
+      const char_code = uint8array[i] | (uint8array[++i] << 8)
+      if (char_code > 0xff) utf16_string += String.fromCharCode(char_code)
+      else utf16_string += `?${char_code.toString(16).padStart(2, '0')}`
     }
     return utf16_string
   }
 
   export function string_to_uint8array(utf16_string: string): Uint8Array {
-    const uint8array = new Uint8Array(utf16_string.length * 2)
+    const result: number[] = []
     for (let i = 0; i < utf16_string.length; i++) {
-      const charCode = utf16_string.charCodeAt(i)
-      uint8array[2 * i] = charCode >> 8
-      uint8array[2 * i + 1] = charCode & 0xff
-    }
-    return uint8array
-  }
-}
-
-namespace SERDE {
-  const INVALID_START_CODES = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57]
-  const INVALID_CODES = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-    31, 32, 33, 34, 35, 36, 37, 38, 39, 42, 43, 44, 47, 58, 59, 60, 61, 62, 63, 64, 91, 92, 93, 94, 96, 123, 124, 125,
-    126, 127
-  ]
-
-  const sequence_regex = /\?[0-9a-zA-Z.\-]{2}|[^?]+/g
-  const encoded_regex = /^\?[0-9a-zA-Z.\-]{2}$/
-
-  const BASE64 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-'
-
-  function* b64_encode(char: string): Generator<void, string, void> {
-    let encoded = ''
-    for (let code = char.charCodeAt(0); code > 0; code = Math.floor(code / 64)) {
-      encoded = BASE64[code % 64] + encoded
-      yield
-    }
-    return encoded
-  }
-
-  function* b64_decode(enc: string): Generator<void, string, void> {
-    let code = 0
-    for (let i = 0; i < enc.length; i++) {
-      code += 64 ** (enc.length - 1 - i) * BASE64.indexOf(enc[i])
-      yield
-    }
-    return String.fromCharCode(code)
-  }
-
-  export function* encode(str: string): Generator<void, string, void> {
-    let result = ''
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charAt(i)
-      const char_code = char.charCodeAt(0)
-      if ((i === 0 && INVALID_START_CODES.includes(char_code)) || INVALID_CODES.includes(char_code)) {
-        result += `?${(yield* b64_encode(char)).padStart(2, '0')}`
+      const char_code = utf16_string.charCodeAt(i)
+      if (char_code === '?'.charCodeAt(0) && i + 2 < utf16_string.length) {
+        const hex = utf16_string.slice(i + 1, i + 3)
+        result.push(parseInt(hex, 16))
       } else {
-        result += char
+        result.push(char_code & 0xff)
+        result.push(char_code >> 8)
       }
-      yield
     }
-    return result
-  }
-
-  export function* decode(str: string): Generator<void, string, void> {
-    let result = ''
-    const seqs = str.match(sequence_regex) ?? []
-    for (let i = 0; i < seqs.length; i++) {
-      const seq = seqs[i]
-      if (seq.startsWith('?') && encoded_regex.test(seq)) result += yield* b64_decode(seq.slice(1))
-      else {
-        result += seq
-      }
-      yield
-    }
-    return result
+    return new Uint8Array(result)
   }
 }
 
@@ -659,19 +462,19 @@ namespace CRYPTO {
     return to_HEX(yield* mod_exp(to_NUM(other), secret, prime))
   }
 
-  export function* encrypt(raw: string, key: string): Generator<void, string, void> {
-    let encrypted = ''
+  export function* encrypt(raw: Uint8Array, key: string): Generator<void, Uint8Array, void> {
+    let encrypted = new Uint8Array(raw.length)
     for (let i = 0; i < raw.length; i++) {
-      encrypted += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+      encrypted[i] = raw[i] ^ key.charCodeAt(i % key.length)
       yield
     }
     return encrypted
   }
 
-  export function* decrypt(encrypted: string, key: string): Generator<void, string, void> {
-    let decrypted = ''
+  export function* decrypt(encrypted: Uint8Array, key: string): Generator<void, Uint8Array, void> {
+    let decrypted = new Uint8Array(encrypted.length)
     for (let i = 0; i < encrypted.length; i++) {
-      decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+      decrypted[i] = encrypted[i] ^ key.charCodeAt(i % key.length)
       yield
     }
     return decrypted
@@ -679,21 +482,41 @@ namespace CRYPTO {
 }
 
 export namespace NET {
+  import ByteArray = SERDE_BINARY.ByteArray
   const FRAG_MAX: number = 2048
 
-  type Listener = (payload: Payload, data: string) => Generator<void, void, void>
+  interface PayloadType {
+    channel: string
+    id: string
+    index?: number
+    final?: boolean
+  }
+
+  const Payload: SERDE_BINARY.Serializable<PayloadType> = SERDE_BINARY.Proto.Object({
+    channel: SERDE_BINARY.Proto.String,
+    id: SERDE_BINARY.Proto.String,
+    index: SERDE_BINARY.Proto.Optional(SERDE_BINARY.Proto.VarInt),
+    final: SERDE_BINARY.Proto.Optional(SERDE_BINARY.Proto.Boolean)
+  })
+
+  type Listener = (payload: PayloadType, packet: Uint8Array) => Generator<void, void, void>
   const namespace_listeners = new Map<string, Array<Listener>>()
 
   system.afterEvents.scriptEventReceive.subscribe(event => {
     system.runJob(
       (function* () {
         const ids = event.id.split(':')
-        const namespace = yield* SERDE.decode(ids[0])
+
+        const namespace_stream = ByteArray.from_uint8array(SERDE_BINARY.string_to_uint8array(ids[0]))
+        const namespace = SERDE_BINARY.Proto.String.deserialize(namespace_stream)
         const listeners = namespace_listeners.get(namespace)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
-          const payload = Payload.fromString(yield* SERDE.decode(ids[1]))
+          const bytes = SERDE_BINARY.string_to_uint8array(ids[1])
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const payload = Payload.deserialize(stream)
+          const packet = SERDE_BINARY.string_to_uint8array(event.message)
           for (let i = 0; i < listeners.length; i++) {
-            yield* listeners[i](payload, event.message)
+            yield* listeners[i](payload, packet)
           }
         }
       })()
@@ -718,20 +541,6 @@ export namespace NET {
     }
   }
 
-  type Payload =
-    | [channel: string, id: string]
-    | [channel: string, id: string, index: number]
-    | [channel: string, id: string, index: number, final: number]
-
-  namespace Payload {
-    export function toString(p: Payload): string {
-      return JSON.stringify(p)
-    }
-    export function fromString(s: string): Payload {
-      return JSON.parse(s)
-    }
-  }
-
   function generate_id(): string {
     const r = (Math.random() * 0x100000000) >>> 0
     return (
@@ -742,71 +551,87 @@ export namespace NET {
     ).toUpperCase()
   }
 
-  export function* emit<T = any>(namespace: string, channel: string, args: T): Generator<void, void, void> {
-    const id = generate_id()
-    const enc_namespace = yield* SERDE.encode(namespace)
-    const enc_args_str = yield* SERDE.encode(JSON.stringify(args))
-
-    const RUN = function* (payload: Payload, data_str: string) {
-      const enc_payload = yield* SERDE.encode(Payload.toString(payload))
-      world.getDimension('overworld').runCommand(`scriptevent ${enc_namespace}:${enc_payload} ${data_str}`)
-    }
-
-    let len = 0
-    let str = ''
-    let str_size = 0
-    for (let i = 0; i < enc_args_str.length; i++) {
-      const char = enc_args_str[i]
-      const code = char.charCodeAt(0)
-      const char_size = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4
-
-      if (str_size + char_size < FRAG_MAX) {
-        str += char
-        str_size += char_size
-      } else {
-        yield* RUN([channel, id, len], str)
-        len++
-        str = char
-        str_size = char_size
-      }
-      yield
-    }
-
-    yield* RUN(len === 0 ? [channel, id] : [channel, id, len, 1], str)
-  }
-
-  export function listen<T = any>(
+  export function* emit<T>(
     namespace: string,
     channel: string,
-    callback: (args: T) => Generator<void, void, void>
-  ) {
-    const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
-    const listener = function* (
-      [p_channel, p_id, p_index, p_final]: Payload,
-      data: string
-    ): Generator<void, void, void> {
-      if (p_channel === channel) {
-        if (p_index === undefined) {
-          yield* callback(JSON.parse(yield* SERDE.decode(data)))
-        } else {
-          let fragment = buffer.get(p_id)
-          if (!fragment) {
-            fragment = { size: -1, data_strs: [], data_size: 0 }
-            buffer.set(p_id, fragment)
-          }
-          if (p_final === 1) fragment.size = p_index + 1
+    serializer: SERDE_BINARY.Serializable<T>,
+    value: T
+  ): Generator<void, void, void> {
+    const id = generate_id()
 
-          fragment.data_strs[p_index] = data
-          fragment.data_size += p_index + 1
+    const namespace_stream = new ByteArray()
+    SERDE_BINARY.Proto.String.serialize(namespace, namespace_stream)
+    const namespace_string = SERDE_BINARY.uint8array_to_string(namespace_stream.to_uint8array())
+
+    const RUN = function* (payload: PayloadType, value_string: string) {
+      const stream = new SERDE_BINARY.ByteArray()
+      Payload.serialize(payload, stream)
+      const bytes = stream.to_uint8array()
+      const payload_string = SERDE_BINARY.uint8array_to_string(bytes)
+      world.getDimension('overworld').runCommand(`scriptevent ${namespace_string}:${payload_string} ${value_string}`)
+    }
+
+    const value_stream = new ByteArray()
+    serializer.serialize(value, value_stream)
+    const value_bytes = value_stream.to_uint8array()
+
+    const packet_count = Math.ceil(value_bytes.length / FRAG_MAX)
+
+    for (let i = 0; i < packet_count; i++) {
+      const start = i * FRAG_MAX
+      const end = Math.min(start + FRAG_MAX, value_bytes.length)
+      const sub_bytes = value_bytes.subarray(start, end)
+      const sub_string = SERDE_BINARY.uint8array_to_string(sub_bytes)
+
+      if (packet_count === 1) yield* RUN({ channel, id }, sub_string)
+      else if (i === packet_count - 1) yield* RUN({ channel, id, index: i, final: true }, sub_string)
+      else yield* RUN({ channel, id, index: i }, sub_string)
+    }
+  }
+
+  export function listen<T>(
+    namespace: string,
+    channel: string,
+    serializer: SERDE_BINARY.Serializable<T>,
+    callback: (value: T) => Generator<void, void, void>
+  ) {
+    const buffer = new Map<string, { size: number; packets: Uint8Array[]; data_size: number }>()
+    const listener: Listener = function* (payload: PayloadType, packet: Uint8Array): Generator<void, void, void> {
+      if (payload.channel === channel) {
+        if (payload.index === undefined) {
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(packet)
+          const value = serializer.deserialize(stream)
+          yield* callback(value)
+        } else {
+          let fragment = buffer.get(payload.id)
+          if (!fragment) {
+            fragment = { size: -1, packets: [], data_size: 0 }
+            buffer.set(payload.id, fragment)
+          }
+          if (payload.final) fragment.size = payload.index + 1
+
+          fragment.packets[payload.index] = packet
+          fragment.data_size += payload.index + 1
 
           if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-            let full_str = ''
-            for (let i = 0; i < fragment.data_strs.length; i++) {
-              full_str += fragment.data_strs[i]
+            let length = 0
+            for (let i = 0; i < fragment.packets.length; i++) {
+              length += fragment.packets[i].length
               yield
             }
-            yield* callback(JSON.parse(yield* SERDE.decode(full_str)))
-            buffer.delete(p_id)
+
+            let bytes = new Uint8Array(length)
+            let offset = 0
+            for (let i = 0; i < fragment.packets.length; i++) {
+              bytes.set(fragment.packets[i], offset)
+              offset += fragment.packets[i].length
+            }
+
+            const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+            const value = serializer.deserialize(stream)
+            yield* callback(value)
+
+            buffer.delete(payload.id)
           }
         }
       }
@@ -814,3 +639,421 @@ export namespace NET {
     return create_listener(namespace, listener)
   }
 }
+
+namespace IPC {
+  const ConnectionSerializer = SERDE_BINARY.Proto.Object({
+    from: SERDE_BINARY.Proto.String,
+    bytes: SERDE_BINARY.Proto.UInt8Array
+  })
+  const HandshakeSynchronizeSerializer = SERDE_BINARY.Proto.Object({
+    id: SERDE_BINARY.Proto.String,
+    encryption_enabled: SERDE_BINARY.Proto.Boolean,
+    encryption_public_key: SERDE_BINARY.Proto.String,
+    encryption_prime: SERDE_BINARY.Proto.VarInt,
+    encryption_modulus: SERDE_BINARY.Proto.VarInt
+  })
+  const HandshakeAcknowledgeSerializer = SERDE_BINARY.Proto.Object({
+    id: SERDE_BINARY.Proto.String,
+    encryption_enabled: SERDE_BINARY.Proto.Boolean,
+    encryption_public_key: SERDE_BINARY.Proto.String
+  })
+
+  export class Connection {
+    private readonly _from: string
+    private readonly _to: string
+    private readonly _enc: string | false
+    private readonly _terminators: Array<() => void>
+
+    private *MAYBE_ENCRYPT(bytes: Uint8Array): Generator<void, Uint8Array, void> {
+      return this._enc !== false ? yield* CRYPTO.encrypt(bytes, this._enc) : bytes
+    }
+    private *MAYBE_DECRYPT(bytes: Uint8Array): Generator<void, Uint8Array, void> {
+      return this._enc !== false ? yield* CRYPTO.decrypt(bytes, this._enc) : bytes
+    }
+
+    get from() {
+      return this._from
+    }
+
+    get to() {
+      return this._to
+    }
+
+    constructor(from: string, to: string, encryption: string | false) {
+      this._from = from
+      this._to = to
+      this._enc = encryption
+      this._terminators = new Array<() => void>()
+    }
+
+    terminate(notify: boolean = true) {
+      const $ = this
+      $._terminators.forEach(terminate => terminate())
+      $._terminators.length = 0
+      if (notify) {
+        system.runJob(NET.emit('ipc', `${$._to}:terminate`, SERDE_BINARY.Proto.String, $._from))
+      }
+    }
+
+    send<T>(channel: string, serializer: SERDE_BINARY.Serializable<T>, value: T): void {
+      const $ = this
+      system.runJob(
+        (function* () {
+          const stream = new SERDE_BINARY.ByteArray()
+          serializer.serialize(value, stream)
+          const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array())
+          yield* NET.emit('ipc', `${$._to}:${channel}:send`, ConnectionSerializer, {
+            from: $._from,
+            bytes
+          })
+        })()
+      )
+    }
+
+    invoke<T, R>(
+      channel: string,
+      serializer: SERDE_BINARY.Serializable<T>,
+      value: T,
+      deserializer: SERDE_BINARY.Serializable<R>
+    ): Promise<R> {
+      const $ = this
+      system.runJob(
+        (function* () {
+          const stream = new SERDE_BINARY.ByteArray()
+          serializer.serialize(value, stream)
+          const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array())
+          yield* NET.emit('ipc', `${$._to}:${channel}:invoke`, ConnectionSerializer, {
+            from: $._from,
+            bytes
+          })
+        })()
+      )
+
+      return new Promise(resolve => {
+        const terminate = NET.listen('ipc', `${$._from}:${channel}:handle`, ConnectionSerializer, function* (data) {
+          if (data.from === $._to) {
+            const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+            const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+            const value = deserializer.deserialize(stream)
+            resolve(value)
+            terminate()
+          }
+        })
+      })
+    }
+
+    on<T>(channel: string, deserializer: SERDE_BINARY.Serializable<T>, listener: (value: T) => void) {
+      const $ = this
+      const terminate = NET.listen('ipc', `${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
+        if (data.from === $._to) {
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const value = deserializer.deserialize(stream)
+          listener(value)
+        }
+      })
+      $._terminators.push(terminate)
+      return terminate
+    }
+
+    once<T>(channel: string, deserializer: SERDE_BINARY.Serializable<T>, listener: (value: T) => void) {
+      const $ = this
+      const terminate = NET.listen('ipc', `${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
+        if (data.from === $._to) {
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const value = deserializer.deserialize(stream)
+          listener(value)
+          terminate()
+        }
+      })
+      $._terminators.push(terminate)
+      return terminate
+    }
+
+    handle<T, R>(
+      channel: string,
+      deserializer: SERDE_BINARY.Serializable<T>,
+      serializer: SERDE_BINARY.Serializable<R>,
+      listener: (value: T) => R
+    ) {
+      const $ = this
+      const terminate = NET.listen('ipc', `${$._from}:${channel}:invoke`, ConnectionSerializer, function* (data) {
+        if (data.from === $._to) {
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const value = deserializer.deserialize(stream)
+          const result = listener(value)
+          const return_stream = new SERDE_BINARY.ByteArray()
+          serializer.serialize(result, return_stream)
+          const return_bytes = yield* $.MAYBE_ENCRYPT(return_stream.to_uint8array())
+          yield* NET.emit('ipc', `${$._to}:${channel}:handle`, ConnectionSerializer, {
+            from: $._from,
+            bytes: return_bytes
+          })
+        }
+      })
+      $._terminators.push(terminate)
+      return terminate
+    }
+  }
+
+  export class ConnectionManager {
+    private readonly _id: string
+    private readonly _enc_map: Map<string, string | false>
+    private readonly _con_map: Map<string, Connection>
+    private readonly _enc_force: boolean
+
+    private *MAYBE_ENCRYPT(bytes: Uint8Array, encryption: string | false): Generator<void, Uint8Array, void> {
+      return encryption !== false ? yield* CRYPTO.encrypt(bytes, encryption) : bytes
+    }
+    private *MAYBE_DECRYPT(bytes: Uint8Array, encryption: string | false): Generator<void, Uint8Array, void> {
+      return encryption !== false ? yield* CRYPTO.decrypt(bytes, encryption) : bytes
+    }
+
+    get id() {
+      return this._id
+    }
+
+    constructor(id: string, force_encryption: boolean = false) {
+      const $ = this
+      this._id = id
+      this._enc_map = new Map<string, string | false>()
+      this._con_map = new Map<string, Connection>()
+      this._enc_force = force_encryption
+      NET.listen('ipc', `${this._id}:handshake:SYN`, HandshakeSynchronizeSerializer, function* (data) {
+        const secret = CRYPTO.make_secret(data.encryption_modulus)
+        const public_key = yield* CRYPTO.make_public(secret, data.encryption_modulus, data.encryption_prime)
+        const enc =
+          data.encryption_enabled || $._enc_force
+            ? yield* CRYPTO.make_shared(secret, data.encryption_public_key, data.encryption_prime)
+            : false
+        $._enc_map.set(data.id, enc)
+        yield* NET.emit('ipc', `${data.id}:handshake:ACK`, HandshakeAcknowledgeSerializer, {
+          id: $._id,
+          encryption_public_key: public_key,
+          encryption_enabled: $._enc_force
+        })
+      })
+
+      NET.listen('ipc', `${this._id}:terminate`, SERDE_BINARY.Proto.String, function* (value) {
+        $._enc_map.delete(value)
+      })
+    }
+
+    connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
+      const $ = this
+      return new Promise((resolve, reject) => {
+        const con = this._con_map.get(to)
+        if (con !== undefined) {
+          con.terminate(false)
+          resolve(con)
+        } else {
+          const secret = CRYPTO.make_secret()
+          system.runJob(
+            (function* () {
+              const public_key = yield* CRYPTO.make_public(secret)
+              yield* NET.emit('ipc', `${to}:handshake:SYN`, HandshakeSynchronizeSerializer, {
+                id: $._id,
+                encryption_enabled: encrypted,
+                encryption_public_key: public_key,
+                encryption_prime: CRYPTO.PRIME,
+                encryption_modulus: CRYPTO.MOD
+              })
+            })()
+          )
+          function clear() {
+            terminate()
+            system.clearRun(timeout_handle)
+          }
+          const timeout_handle = system.runTimeout(() => {
+            reject()
+            clear()
+          }, timeout)
+          const terminate = NET.listen(
+            'ipc',
+            `${this._id}:handshake:ACK`,
+            HandshakeAcknowledgeSerializer,
+            function* (data) {
+              if (data.id === to) {
+                const enc =
+                  data.encryption_enabled || encrypted
+                    ? yield* CRYPTO.make_shared(secret, data.encryption_public_key)
+                    : false
+                const new_con = new Connection($._id, to, enc)
+                $._con_map.set(to, new_con)
+                resolve(new_con)
+                clear()
+              }
+            }
+          )
+        }
+      })
+    }
+
+    send<T>(channel: string, serializer: SERDE_BINARY.Serializable<T>, value: T): void {
+      const $ = this
+      system.runJob(
+        (function* () {
+          for (const [key, enc] of $._enc_map) {
+            const stream = new SERDE_BINARY.ByteArray()
+            serializer.serialize(value, stream)
+            const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array(), enc)
+            yield* NET.emit('ipc', `${key}:${channel}:send`, ConnectionSerializer, {
+              from: $._id,
+              bytes
+            })
+          }
+        })()
+      )
+    }
+
+    invoke<T, R>(
+      channel: string,
+      serializer: SERDE_BINARY.Serializable<T>,
+      value: T,
+      deserializer: SERDE_BINARY.Serializable<R>
+    ): Promise<R>[] {
+      const $ = this
+      const promises: Promise<any>[] = []
+
+      for (const [key, enc] of $._enc_map) {
+        system.runJob(
+          (function* () {
+            const stream = new SERDE_BINARY.ByteArray()
+            serializer.serialize(value, stream)
+            const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array(), enc)
+            yield* NET.emit('ipc', `${key}:${channel}:invoke`, ConnectionSerializer, {
+              from: $._id,
+              bytes
+            })
+          })()
+        )
+
+        promises.push(
+          new Promise(resolve => {
+            const terminate = NET.listen('ipc', `${$._id}:${channel}:handle`, ConnectionSerializer, function* (data) {
+              if (data.from === key) {
+                const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+                const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+                const value = deserializer.deserialize(stream)
+                resolve(value)
+                terminate()
+              }
+            })
+          })
+        )
+      }
+      return promises
+    }
+
+    on<T>(channel: string, deserializer: SERDE_BINARY.Serializable<T>, listener: (value: T) => void) {
+      const $ = this
+      return NET.listen('ipc', `${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
+        const enc = $._enc_map.get(data.from) as string | false
+        if (enc !== undefined) {
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const value = deserializer.deserialize(stream)
+          listener(value)
+        }
+      })
+    }
+
+    once<T>(channel: string, deserializer: SERDE_BINARY.Serializable<T>, listener: (value: T) => void) {
+      const $ = this
+      const terminate = NET.listen('ipc', `${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
+        const enc = $._enc_map.get(data.from) as string | false
+        if (enc !== undefined) {
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const value = deserializer.deserialize(stream)
+          listener(value)
+          terminate()
+        }
+      })
+      return terminate
+    }
+
+    handle<T, R>(
+      channel: string,
+      deserializer: SERDE_BINARY.Serializable<T>,
+      serializer: SERDE_BINARY.Serializable<R>,
+      listener: (value: T) => R
+    ) {
+      const $ = this
+      return NET.listen('ipc', `${$._id}:${channel}:invoke`, ConnectionSerializer, function* (data) {
+        const enc = $._enc_map.get(data.from) as string | false
+        if (enc !== undefined) {
+          const input_bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+          const input_stream = SERDE_BINARY.ByteArray.from_uint8array(input_bytes)
+          const input_value = deserializer.deserialize(input_stream)
+          const result = listener(input_value)
+          const output_stream = new SERDE_BINARY.ByteArray()
+          serializer.serialize(result, output_stream)
+          const output_bytes = yield* $.MAYBE_ENCRYPT(output_stream.to_uint8array(), enc)
+          yield* NET.emit('ipc', `${data.from}:${channel}:handle`, ConnectionSerializer, {
+            from: $._id,
+            bytes: output_bytes
+          })
+        }
+      })
+    }
+  }
+
+  /** Sends a message with `args` to `channel` */
+  export function send<T>(channel: string, serializer: SERDE_BINARY.Serializable<T>, value: T): void {
+    system.runJob(NET.emit('ipc', `${channel}:send`, serializer, value))
+  }
+
+  /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
+  export function invoke<T, R>(
+    channel: string,
+    serializer: SERDE_BINARY.Serializable<T>,
+    value: T,
+    deserializer: SERDE_BINARY.Serializable<R>
+  ): Promise<R> {
+    system.runJob(NET.emit('ipc', `${channel}:invoke`, serializer, value))
+    return new Promise(resolve => {
+      const terminate = NET.listen('ipc', `${channel}:handle`, deserializer, function* (value) {
+        resolve(value)
+        terminate()
+      })
+    })
+  }
+
+  /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
+  export function on<T>(
+    channel: string,
+    deserializer: SERDE_BINARY.Serializable<T>,
+    listener: (value: T) => void
+  ): () => void {
+    return NET.listen('ipc', `${channel}:send`, deserializer, function* (value) {
+      listener(value)
+    })
+  }
+
+  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
+  export function once<T>(channel: string, deserializer: SERDE_BINARY.Serializable<T>, listener: (value: T) => void) {
+    const terminate = NET.listen('ipc', `${channel}:send`, deserializer, function* (value) {
+      listener(value)
+      terminate()
+    })
+    return terminate
+  }
+
+  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
+  export function handle<T, R>(
+    channel: string,
+    deserializer: SERDE_BINARY.Serializable<T>,
+    serializer: SERDE_BINARY.Serializable<R>,
+    listener: (value: T) => R
+  ): () => void {
+    return NET.listen('ipc', `${channel}:invoke`, deserializer, function* (value) {
+      const result = listener(value)
+      yield* NET.emit('ipc', `${channel}:handle`, serializer, result)
+    })
+  }
+}
+
+export default IPC
