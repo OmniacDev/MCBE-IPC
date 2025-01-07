@@ -329,8 +329,8 @@ export namespace SERDE_BINARY {
     static Object<T extends object>(obj: { [K in keyof T]: Serializable<T[K]> }): Serializable<T> {
       return {
         serialize(value, stream) {
-          for (const key in value) {
-            if (obj.hasOwnProperty(key)) {
+          for (const key in obj) {
+            if (value.hasOwnProperty(key)) {
               obj[key].serialize(value[key], stream)
             }
           }
@@ -583,9 +583,9 @@ export namespace NET {
       const sub_bytes = value_bytes.subarray(start, end)
       const sub_string = SERDE_BINARY.uint8array_to_string(sub_bytes)
 
-      if (packet_count === 1) yield* RUN({ channel, id }, sub_string)
-      else if (i === packet_count - 1) yield* RUN({ channel, id, index: i, final: true }, sub_string)
-      else yield* RUN({ channel, id, index: i }, sub_string)
+      if (packet_count === 1) yield* RUN({ channel, id: id }, sub_string)
+      else if (i === packet_count - 1) yield* RUN({ channel, id: id, index: i, final: true }, sub_string)
+      else yield* RUN({ channel, id: id, index: i }, sub_string)
     }
   }
 
@@ -646,14 +646,14 @@ namespace IPC {
     bytes: SERDE_BINARY.Proto.UInt8Array
   })
   const HandshakeSynchronizeSerializer = SERDE_BINARY.Proto.Object({
-    id: SERDE_BINARY.Proto.String,
+    from: SERDE_BINARY.Proto.String,
     encryption_enabled: SERDE_BINARY.Proto.Boolean,
     encryption_public_key: SERDE_BINARY.Proto.String,
     encryption_prime: SERDE_BINARY.Proto.VarInt,
     encryption_modulus: SERDE_BINARY.Proto.VarInt
   })
   const HandshakeAcknowledgeSerializer = SERDE_BINARY.Proto.Object({
-    id: SERDE_BINARY.Proto.String,
+    from: SERDE_BINARY.Proto.String,
     encryption_enabled: SERDE_BINARY.Proto.Boolean,
     encryption_public_key: SERDE_BINARY.Proto.String
   })
@@ -732,8 +732,8 @@ namespace IPC {
       return new Promise(resolve => {
         const terminate = NET.listen('ipc', `${$._from}:${channel}:handle`, ConnectionSerializer, function* (data) {
           if (data.from === $._to) {
-            const bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse())
-            const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+            const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+            const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes.reverse())
             const value = deserializer.deserialize(stream)
             resolve(value)
             terminate()
@@ -746,8 +746,8 @@ namespace IPC {
       const $ = this
       const terminate = NET.listen('ipc', `${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
-          const bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse())
-          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes.reverse())
           const value = deserializer.deserialize(stream)
           listener(value)
         }
@@ -760,8 +760,8 @@ namespace IPC {
       const $ = this
       const terminate = NET.listen('ipc', `${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
-          const bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse())
-          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes.reverse())
           const value = deserializer.deserialize(stream)
           listener(value)
           terminate()
@@ -780,8 +780,8 @@ namespace IPC {
       const $ = this
       const terminate = NET.listen('ipc', `${$._from}:${channel}:invoke`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
-          const bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse())
-          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes.reverse())
           const value = deserializer.deserialize(stream)
           const result = listener(value)
           const return_stream = new SERDE_BINARY.ByteArray()
@@ -828,9 +828,9 @@ namespace IPC {
           data.encryption_enabled || $._enc_force
             ? yield* CRYPTO.make_shared(secret, data.encryption_public_key, data.encryption_prime)
             : false
-        $._enc_map.set(data.id, enc)
-        yield* NET.emit('ipc', `${data.id}:handshake:ACK`, HandshakeAcknowledgeSerializer, {
-          id: $._id,
+        $._enc_map.set(data.from, enc)
+        yield* NET.emit('ipc', `${data.from}:handshake:ACK`, HandshakeAcknowledgeSerializer, {
+          from: $._id,
           encryption_public_key: public_key,
           encryption_enabled: $._enc_force
         })
@@ -854,7 +854,7 @@ namespace IPC {
             (function* () {
               const public_key = yield* CRYPTO.make_public(secret)
               yield* NET.emit('ipc', `${to}:handshake:SYN`, HandshakeSynchronizeSerializer, {
-                id: $._id,
+                from: $._id,
                 encryption_enabled: encrypted,
                 encryption_public_key: public_key,
                 encryption_prime: CRYPTO.PRIME,
@@ -875,7 +875,7 @@ namespace IPC {
             `${this._id}:handshake:ACK`,
             HandshakeAcknowledgeSerializer,
             function* (data) {
-              if (data.id === to) {
+              if (data.from === to) {
                 const enc =
                   data.encryption_enabled || encrypted
                     ? yield* CRYPTO.make_shared(secret, data.encryption_public_key)
@@ -934,8 +934,8 @@ namespace IPC {
           new Promise(resolve => {
             const terminate = NET.listen('ipc', `${$._id}:${channel}:handle`, ConnectionSerializer, function* (data) {
               if (data.from === key) {
-                const bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse(), enc)
-                const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+                const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+                const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes.reverse())
                 const value = deserializer.deserialize(stream)
                 resolve(value)
                 terminate()
@@ -952,8 +952,8 @@ namespace IPC {
       return NET.listen('ipc', `${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
-          const bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse(), enc)
-          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes.reverse())
           const value = deserializer.deserialize(stream)
           listener(value)
         }
@@ -965,8 +965,8 @@ namespace IPC {
       const terminate = NET.listen('ipc', `${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
-          const bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse(), enc)
-          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes.reverse())
           const value = deserializer.deserialize(stream)
           listener(value)
           terminate()
@@ -985,8 +985,8 @@ namespace IPC {
       return NET.listen('ipc', `${$._id}:${channel}:invoke`, ConnectionSerializer, function* (data) {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
-          const input_bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse(), enc)
-          const input_stream = SERDE_BINARY.ByteArray.from_uint8array(input_bytes)
+          const input_bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+          const input_stream = SERDE_BINARY.ByteArray.from_uint8array(input_bytes.reverse())
           const input_value = deserializer.deserialize(input_stream)
           const result = listener(input_value)
           const output_stream = new SERDE_BINARY.ByteArray()
