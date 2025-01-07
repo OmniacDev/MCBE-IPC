@@ -934,8 +934,8 @@ namespace IPC {
           new Promise(resolve => {
             const terminate = NET.listen('ipc', `${$._id}:${channel}:handle`, ConnectionSerializer, function* (data) {
               if (data.from === key) {
-                const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-                const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes.reverse())
+                const bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse(), enc)
+                const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
                 const value = deserializer.deserialize(stream)
                 resolve(value)
                 terminate()
@@ -952,8 +952,8 @@ namespace IPC {
       return NET.listen('ipc', `${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
-          const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes.reverse())
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse(), enc)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
           const value = deserializer.deserialize(stream)
           listener(value)
         }
@@ -965,8 +965,8 @@ namespace IPC {
       const terminate = NET.listen('ipc', `${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
-          const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes.reverse())
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse(), enc)
+          const stream = SERDE_BINARY.ByteArray.from_uint8array(bytes)
           const value = deserializer.deserialize(stream)
           listener(value)
           terminate()
@@ -985,8 +985,8 @@ namespace IPC {
       return NET.listen('ipc', `${$._id}:${channel}:invoke`, ConnectionSerializer, function* (data) {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
-          const input_bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-          const input_stream = SERDE_BINARY.ByteArray.from_uint8array(input_bytes.reverse())
+          const input_bytes = yield* $.MAYBE_DECRYPT(data.bytes.reverse(), enc)
+          const input_stream = SERDE_BINARY.ByteArray.from_uint8array(input_bytes)
           const input_value = deserializer.deserialize(input_stream)
           const result = listener(input_value)
           const output_stream = new SERDE_BINARY.ByteArray()
