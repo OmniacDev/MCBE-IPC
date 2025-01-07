@@ -25,7 +25,7 @@
 
 import { ScriptEventSource, system, world } from '@minecraft/server'
 
-namespace SERDE_BINARY {
+export namespace SERDE_BINARY {
   export class ByteArray {
     private _buffer: Uint8Array
     private _data_view: DataView
