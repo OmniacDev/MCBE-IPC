@@ -193,29 +193,52 @@ export namespace SERDE {
     }
   }
 
-  export function uint8array_to_string(uint8array: Uint8Array): string {
-    let utf16_string = ''
+  export function* serialize(byte_array: ByteArray, max_size: number = Infinity): Generator<void, string[], void> {
+    const uint8array = byte_array.to_uint8array()
+    const result: string[] = []
+
+    let accumulated_str: string = ''
+    let accumulated_size: number = 0
     for (let i = 0; i < uint8array.length; i++) {
       const char_code = uint8array[i] | (uint8array[++i] << 8)
-      if (char_code > 0xff) utf16_string += String.fromCharCode(char_code)
-      else utf16_string += `?${char_code.toString(16).padStart(2, '0')}`
+      const char_size = char_code > 0xff ? 2 : 3
+      if (accumulated_size + char_size > max_size) {
+        result.push(accumulated_str)
+        accumulated_str = ''
+        accumulated_size = 0
+      }
+
+      if (char_code > 0xff) {
+        accumulated_str += String.fromCharCode(char_code)
+        accumulated_size += 2
+      } else {
+        accumulated_str += `?${char_code.toString(16).padStart(2, '0')}`
+        accumulated_size += 3
+      }
+      yield
     }
-    return utf16_string
+    return result
   }
 
-  export function string_to_uint8array(utf16_string: string): Uint8Array {
+  export function* deserialize(strings: string[]): Generator<void, ByteArray, void> {
     const result: number[] = []
-    for (let i = 0; i < utf16_string.length; i++) {
-      const char_code = utf16_string.charCodeAt(i)
-      if (char_code === '?'.charCodeAt(0) && i + 2 < utf16_string.length) {
-        const hex = utf16_string.slice(i + 1, i + 3)
-        result.push(parseInt(hex, 16))
-      } else {
-        result.push(char_code & 0xff)
-        result.push(char_code >> 8)
+    for (let i = 0; i < strings.length; i++) {
+      const str = strings[i]
+      for (let j = 0; j < str.length; j++) {
+        const char_code = str.charCodeAt(j)
+        if (char_code === '?'.charCodeAt(0) && j + 2 < str.length) {
+          const hex = str.slice(j + 1, j + 3)
+          result.push(parseInt(hex, 16))
+          j += 2
+        } else {
+          result.push(char_code & 0xff)
+          result.push(char_code >> 8)
+        }
+        yield
       }
+      yield
     }
-    return new Uint8Array(result)
+    return ByteArray.from_uint8array(new Uint8Array(result).reverse())
   }
 }
 
@@ -487,7 +510,7 @@ export namespace NET {
 
   type Endpoint = string
   type Packet = Uint8Array
-  type Listener = (header: Header, packet: Packet) => Generator<void, void, void>
+  type Listener = (header: Header, serialized_packet: string) => Generator<void, void, void>
   interface Header {
     guid: string
     index?: number
@@ -507,22 +530,17 @@ export namespace NET {
       (function* () {
         const [serialized_endpoint, serialized_header] = event.id.split(':')
 
-        const endpoint_stream: ByteArray = ByteArray.from_uint8array(
-          SERDE.string_to_uint8array(serialized_endpoint).reverse()
-        )
+        const endpoint_stream: ByteArray = yield* SERDE.deserialize([serialized_endpoint])
+
         const endpoint: Endpoint = Proto.String.deserialize(endpoint_stream)
 
         const listeners = endpoint_map.get(endpoint)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
-          const header_stream: ByteArray = ByteArray.from_uint8array(
-            SERDE.string_to_uint8array(serialized_header).reverse()
-          )
+          const header_stream: ByteArray = yield* SERDE.deserialize([serialized_header])
+
           const header: Header = Header.deserialize(header_stream)
-
-          const packet: Packet = SERDE.string_to_uint8array(event.message).reverse()
-
           for (let i = 0; i < listeners.length; i++) {
-            yield* listeners[i](header, packet)
+            yield* listeners[i](header, event.message)
           }
         }
       })()
@@ -562,12 +580,12 @@ export namespace NET {
 
     const endpoint_stream = new ByteArray()
     Proto.String.serialize(endpoint, endpoint_stream)
-    const serialized_endpoint = SERDE.uint8array_to_string(endpoint_stream.to_uint8array())
+    const [serialized_endpoint] = yield* SERDE.serialize(endpoint_stream)
 
     const RUN = function* (header: Header, serialized_packet: string) {
       const header_stream = new SERDE.ByteArray()
       Header.serialize(header, header_stream)
-      const serialized_header = SERDE.uint8array_to_string(header_stream.to_uint8array())
+      const [serialized_header] = yield* SERDE.serialize(header_stream)
       world
         .getDimension('overworld')
         .runCommand(`scriptevent ${serialized_endpoint}:${serialized_header} ${serialized_packet}`)
@@ -575,19 +593,15 @@ export namespace NET {
 
     const packet_stream = new ByteArray()
     serializer.serialize(value, packet_stream)
-    const packet = packet_stream.to_uint8array()
 
-    const packet_count = Math.ceil(packet.length / FRAG_MAX)
+    const serialized_packets = yield* SERDE.serialize(endpoint_stream, FRAG_MAX)
+    for (let i = 0; i < serialized_packets.length; i++) {
+      const serialized_packet = serialized_packets[i]
 
-    for (let i = 0; i < packet_count; i++) {
-      const start = i * FRAG_MAX
-      const end = Math.min(start + FRAG_MAX, packet.length)
-      const sub_bytes = packet.subarray(start, end)
-      const sub_string = SERDE.uint8array_to_string(sub_bytes)
-
-      if (packet_count === 1) yield* RUN({ guid }, sub_string)
-      else if (i === packet_count - 1) yield* RUN({ guid, index: i, final: true }, sub_string)
-      else yield* RUN({ guid, index: i }, sub_string)
+      if (serialized_packets.length === 1) yield* RUN({ guid }, serialized_packet)
+      else if (i === serialized_packets.length - 1) yield* RUN({ guid, index: i, final: true }, serialized_packet)
+      else yield* RUN({ guid, index: i }, serialized_packet)
+      yield
     }
   }
 
@@ -596,38 +610,25 @@ export namespace NET {
     serializer: Serializable<T>,
     callback: (value: T) => Generator<void, void, void>
   ) {
-    const buffer = new Map<string, { size: number; packets: Packet[]; data_size: number }>()
-    const listener: Listener = function* (payload: Header, packet: Packet): Generator<void, void, void> {
+    const buffer = new Map<string, { size: number; serialized_packets: string[]; data_size: number }>()
+    const listener: Listener = function* (payload: Header, serialized_packet: string): Generator<void, void, void> {
       if (payload.index === undefined) {
-        const packet_stream = SERDE.ByteArray.from_uint8array(packet)
+        const packet_stream = yield* SERDE.deserialize([serialized_packet])
         const value = serializer.deserialize(packet_stream)
         yield* callback(value)
       } else {
         let fragment = buffer.get(payload.guid)
         if (!fragment) {
-          fragment = { size: -1, packets: [], data_size: 0 }
+          fragment = { size: -1, serialized_packets: [], data_size: 0 }
           buffer.set(payload.guid, fragment)
         }
         if (payload.final) fragment.size = payload.index + 1
 
-        fragment.packets[payload.index] = packet
+        fragment.serialized_packets[payload.index] = serialized_packet
         fragment.data_size += payload.index + 1
 
         if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-          let length = 0
-          for (let i = 0; i < fragment.packets.length; i++) {
-            length += fragment.packets[i].length
-            yield
-          }
-
-          let bytes = new Uint8Array(length)
-          let offset = 0
-          for (let i = 0; i < fragment.packets.length; i++) {
-            bytes.set(fragment.packets[i], offset)
-            offset += fragment.packets[i].length
-          }
-
-          const stream = SERDE.ByteArray.from_uint8array(bytes)
+          const stream = yield* SERDE.deserialize(fragment.serialized_packets)
           const value = serializer.deserialize(stream)
           yield* callback(value)
 
