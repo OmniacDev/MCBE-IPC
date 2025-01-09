@@ -494,7 +494,7 @@ export class Proto {
         }
       },
       *deserialize(stream) {
-        const defined = Proto.Boolean.deserialize(stream)
+        const defined = yield* Proto.Boolean.deserialize(stream)
         if (defined) {
           return yield* item.deserialize(stream)
         }
@@ -513,7 +513,6 @@ export namespace NET {
   const FRAG_MAX: number = 2048
 
   type Endpoint = string
-  type Packet = Uint8Array
   type Listener = (header: Header, serialized_packet: string) => Generator<void, void, void>
   interface Header {
     guid: string
