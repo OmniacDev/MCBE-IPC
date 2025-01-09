@@ -219,7 +219,7 @@ export namespace SERDE {
       yield
     }
     result.push(acc_str)
-    
+
     return result
   }
 
