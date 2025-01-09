@@ -197,26 +197,28 @@ export namespace SERDE {
     const uint8array = byte_array.to_uint8array()
     const result: string[] = []
 
-    let accumulated_str: string = ''
-    let accumulated_size: number = 0
+    let acc_str: string = ''
+    let acc_size: number = 0
     for (let i = 0; i < uint8array.length; i++) {
       const char_code = uint8array[i] | (uint8array[++i] << 8)
       const char_size = char_code > 0xff ? 2 : 3
-      if (accumulated_size + char_size > max_size) {
-        result.push(accumulated_str)
-        accumulated_str = ''
-        accumulated_size = 0
+      if (acc_size + char_size > max_size) {
+        result.push(acc_str)
+        acc_str = ''
+        acc_size = 0
       }
 
       if (char_code > 0xff) {
-        accumulated_str += String.fromCharCode(char_code)
-        accumulated_size += 2
+        acc_str += String.fromCharCode(char_code)
+        acc_size += 2
       } else {
-        accumulated_str += `?${char_code.toString(16).padStart(2, '0')}`
-        accumulated_size += 3
+        acc_str += `?${char_code.toString(16).padStart(2, '0')}`
+        acc_size += 3
       }
       yield
     }
+    result.push(acc_str)
+    
     return result
   }
 
@@ -594,7 +596,7 @@ export namespace NET {
     const packet_stream = new ByteArray()
     serializer.serialize(value, packet_stream)
 
-    const serialized_packets = yield* SERDE.serialize(endpoint_stream, FRAG_MAX)
+    const serialized_packets = yield* SERDE.serialize(packet_stream, FRAG_MAX)
     for (let i = 0; i < serialized_packets.length; i++) {
       const serialized_packet = serialized_packets[i]
 
