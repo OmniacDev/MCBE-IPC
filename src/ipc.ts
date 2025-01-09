@@ -676,7 +676,7 @@ export namespace NET {
   }
 }
 
-namespace IPC {
+export namespace IPC {
   const ConnectionSerializer = Proto.Object({
     from: Proto.String,
     bytes: Proto.UInt8Array
