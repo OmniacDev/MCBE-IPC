@@ -435,6 +435,14 @@ export class Proto {
       return result
     }
   }
+  static Date: NET.Serializable<Date> = {
+    *serialize(value: Date, stream: SERDE.ByteArray) {
+      yield* Proto.VarInt.serialize(value.getTime(), stream)
+    },
+    *deserialize(stream: SERDE.ByteArray) {
+      return new Date(yield* Proto.VarInt.deserialize(stream))
+    }
+  }
   static Object<T extends object>(obj: { [K in keyof T]: NET.Serializable<T[K]> }): NET.Serializable<T> {
     return {
       *serialize(value, stream) {
@@ -498,6 +506,46 @@ export class Proto {
         if (defined) {
           return yield* item.deserialize(stream)
         }
+      }
+    }
+  }
+  static Map<K, V>(key: NET.Serializable<K>, value: NET.Serializable<V>): NET.Serializable<Map<K, V>> {
+    return {
+      *serialize(map, stream) {
+        yield* Proto.VarInt.serialize(map.size, stream)
+        for (const [k, v] of map.entries()) {
+          yield* key.serialize(k, stream)
+          yield* value.serialize(v, stream)
+        }
+      },
+      *deserialize(stream) {
+        const size = yield* Proto.VarInt.deserialize(stream)
+        const result = new Map<K, V>()
+        for (let i = 0; i < size; i++) {
+          const k = yield* key.deserialize(stream)
+          const v = yield* value.deserialize(stream)
+          result.set(k, v)
+        }
+        return result
+      }
+    }
+  }
+  static Set<V>(value: NET.Serializable<V>): NET.Serializable<Set<V>> {
+    return {
+      *serialize(set, stream) {
+        yield* Proto.VarInt.serialize(set.size, stream)
+        for (const [_, v] of set.entries()) {
+          yield* value.serialize(v, stream)
+        }
+      },
+      *deserialize(stream) {
+        const size = yield* Proto.VarInt.deserialize(stream)
+        const result = new Set<V>()
+        for (let i = 0; i < size; i++) {
+          const v = yield* value.deserialize(stream)
+          result.add(v)
+        }
+        return result
       }
     }
   }
