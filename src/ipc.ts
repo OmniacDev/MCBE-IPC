@@ -201,7 +201,8 @@ export namespace SERDE {
     let acc_size: number = 0
     for (let i = 0; i < uint8array.length; i++) {
       const char_code = uint8array[i] | (uint8array[++i] << 8)
-      const char_size = char_code > 0xff ? 2 : 3
+      const utf16_size = char_code <= 0x7f ? 1 : char_code <= 0x7ff ? 2 : char_code <= 0xffff ? 3 : 4
+      const char_size = char_code > 0xff ? utf16_size : 3
       if (acc_size + char_size > max_size) {
         result.push(acc_str)
         acc_str = ''
@@ -210,7 +211,7 @@ export namespace SERDE {
 
       if (char_code > 0xff) {
         acc_str += String.fromCharCode(char_code)
-        acc_size += 2
+        acc_size += utf16_size
       } else {
         acc_str += `?${char_code.toString(16).padStart(2, '0')}`
         acc_size += 3
