@@ -50,21 +50,6 @@ export namespace SERDE {
       return Array.from(values)
     }
 
-    write_start(...values: number[]): void {
-      this._ensure_capacity(this._length + values.length)
-      this._buffer.set(this._buffer.subarray(0, this._length), values.length)
-      this._buffer.set(values, 0)
-      this._length += values.length
-    }
-
-    read_start(): number | undefined {
-      if (this._length === 0) return undefined
-      const value = this._buffer[0]
-      this._buffer.set(this._buffer.subarray(1, this._length))
-      this._length--
-      return value
-    }
-
     write_uint8(value: number): void {
       this._ensure_capacity(this._length + 1)
       this._data_view.setUint8(this._length, value)
