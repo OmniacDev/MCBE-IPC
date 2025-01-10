@@ -32,6 +32,10 @@ export namespace SERDE {
     private _length: number
     private _offset: number
 
+    private get _end() {
+      return this._length + this._offset
+    }
+
     constructor(size: number = 256) {
       this._buffer = new Uint8Array(size)
       this._data_view = new DataView(this._buffer.buffer)
@@ -40,14 +44,14 @@ export namespace SERDE {
     }
 
     write(...values: number[]): void {
-      this._ensure_capacity(this._length + values.length)
-      this._buffer.set(values, this._length)
+      this._ensure_capacity(this._end + values.length)
+      this._buffer.set(values, this._end)
       this._length += values.length
     }
 
     read(amount: number = 1): number[] {
       if (this._length > 0) {
-        const max_amount = amount > this._length - this._offset ? this._length - this._offset : amount
+        const max_amount = amount > this._length ? this._length : amount
         const values = this._buffer.subarray(this._offset, this._offset + max_amount)
         this._length -= max_amount
         this._offset += max_amount
@@ -57,8 +61,8 @@ export namespace SERDE {
     }
 
     write_uint8(value: number): void {
-      this._ensure_capacity(this._length + 1)
-      this._data_view.setUint8(this._length, value)
+      this._ensure_capacity(this._end + 1)
+      this._data_view.setUint8(this._end, value)
       this._length += 1
     }
 
@@ -73,8 +77,8 @@ export namespace SERDE {
     }
 
     write_uint16(value: number): void {
-      this._ensure_capacity(this._length + 2)
-      this._data_view.setUint16(this._length, value)
+      this._ensure_capacity(this._end + 2)
+      this._data_view.setUint16(this._end, value)
       this._length += 2
     }
 
@@ -89,8 +93,8 @@ export namespace SERDE {
     }
 
     write_uint32(value: number): void {
-      this._ensure_capacity(this._length + 4)
-      this._data_view.setUint32(this._length, value)
+      this._ensure_capacity(this._end + 4)
+      this._data_view.setUint32(this._end, value)
       this._length += 4
     }
 
@@ -105,8 +109,8 @@ export namespace SERDE {
     }
 
     write_int8(value: number): void {
-      this._ensure_capacity(this._length + 1)
-      this._data_view.setInt8(this._length, value)
+      this._ensure_capacity(this._end + 1)
+      this._data_view.setInt8(this._end, value)
       this._length += 1
     }
 
@@ -121,8 +125,8 @@ export namespace SERDE {
     }
 
     write_int16(value: number): void {
-      this._ensure_capacity(this._length + 2)
-      this._data_view.setInt16(this._length, value)
+      this._ensure_capacity(this._end + 2)
+      this._data_view.setInt16(this._end, value)
       this._length += 2
     }
 
@@ -137,8 +141,8 @@ export namespace SERDE {
     }
 
     write_int32(value: number): void {
-      this._ensure_capacity(this._length + 4)
-      this._data_view.setInt32(this._length, value)
+      this._ensure_capacity(this._end + 4)
+      this._data_view.setInt32(this._end, value)
       this._length += 4
     }
 
@@ -153,8 +157,8 @@ export namespace SERDE {
     }
 
     write_f32(value: number): void {
-      this._ensure_capacity(this._length + 4)
-      this._data_view.setFloat32(this._length, value)
+      this._ensure_capacity(this._end + 4)
+      this._data_view.setFloat32(this._end, value)
       this._length += 4
     }
 
@@ -169,8 +173,8 @@ export namespace SERDE {
     }
 
     write_f64(value: number): void {
-      this._ensure_capacity(this._length + 8)
-      this._data_view.setFloat64(this._length, value)
+      this._ensure_capacity(this._end + 8)
+      this._data_view.setFloat64(this._end, value)
       this._length += 8
     }
 
@@ -187,7 +191,7 @@ export namespace SERDE {
     private _ensure_capacity(size: number) {
       if (size > this._buffer.length) {
         const larger_buffer = new Uint8Array(size * 2)
-        larger_buffer.set(this._buffer.subarray(this._offset, this._length))
+        larger_buffer.set(this._buffer.subarray(this._offset, this._end), 0)
         this._buffer = larger_buffer
         this._offset = 0
         this._data_view = new DataView(this._buffer.buffer)
@@ -204,7 +208,7 @@ export namespace SERDE {
     }
 
     to_uint8array() {
-      return this._buffer.subarray(this._offset, this._length)
+      return this._buffer.subarray(this._offset, this._end)
     }
   }
 
