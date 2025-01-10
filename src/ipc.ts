@@ -30,11 +30,13 @@ export namespace SERDE {
     private _buffer: Uint8Array
     private _data_view: DataView
     private _length: number
+    private _offset: number
 
     constructor(size: number = 256) {
       this._buffer = new Uint8Array(size)
       this._data_view = new DataView(this._buffer.buffer)
       this._length = 0
+      this._offset = 0
     }
 
     write(...values: number[]): void {
@@ -44,10 +46,14 @@ export namespace SERDE {
     }
 
     read(amount: number = 1): number[] {
-      if (this._length === 0) return []
-      const values = this._buffer.subarray(this._length - amount, this._length).reverse()
-      this._length -= amount
-      return Array.from(values)
+      if (this._length > 0) {
+        const max_amount = amount > this._length - this._offset ? this._length - this._offset : amount
+        const values = this._buffer.subarray(this._offset, this._offset + max_amount)
+        this._length -= max_amount
+        this._offset += max_amount
+        return Array.from(values)
+      }
+      return []
     }
 
     write_uint8(value: number): void {
@@ -57,8 +63,13 @@ export namespace SERDE {
     }
 
     read_uint8(): number | undefined {
-      if (this._length < 1) return undefined
-      return this._data_view.getUint8(--this._length)
+      if (this._length >= 1) {
+        const value = this._data_view.getUint8(this._offset)
+        this._length -= 1
+        this._offset += 1
+        return value
+      }
+      return undefined
     }
 
     write_uint16(value: number): void {
@@ -68,11 +79,13 @@ export namespace SERDE {
     }
 
     read_uint16(): number | undefined {
-      if (this._length < 2) return undefined
-      const bytes = new Uint8Array(this._buffer.subarray(this._length - 2, this._length)).reverse()
-      const value = new DataView(bytes.buffer).getUint16(0)
-      this._length -= 2
-      return value
+      if (this._length >= 2) {
+        const value = this._data_view.getUint16(this._offset)
+        this._length -= 2
+        this._offset += 2
+        return value
+      }
+      return undefined
     }
 
     write_uint32(value: number): void {
@@ -82,11 +95,13 @@ export namespace SERDE {
     }
 
     read_uint32(): number | undefined {
-      if (this._length < 4) return undefined
-      const bytes = new Uint8Array(this._buffer.subarray(this._length - 4, this._length)).reverse()
-      const value = new DataView(bytes.buffer).getUint32(0)
-      this._length -= 4
-      return value
+      if (this._length >= 4) {
+        const value = this._data_view.getUint32(this._offset)
+        this._length -= 4
+        this._offset += 4
+        return value
+      }
+      return undefined
     }
 
     write_int8(value: number): void {
@@ -96,8 +111,13 @@ export namespace SERDE {
     }
 
     read_int8(): number | undefined {
-      if (this._length < 1) return undefined
-      return this._data_view.getInt8(--this._length)
+      if (this._length >= 1) {
+        const value = this._data_view.getInt8(this._offset)
+        this._length -= 1
+        this._offset += 1
+        return value
+      }
+      return undefined
     }
 
     write_int16(value: number): void {
@@ -107,11 +127,13 @@ export namespace SERDE {
     }
 
     read_int16(): number | undefined {
-      if (this._length < 2) return undefined
-      const bytes = new Uint8Array(this._buffer.subarray(this._length - 2, this._length)).reverse()
-      const value = new DataView(bytes.buffer).getInt16(0)
-      this._length -= 2
-      return value
+      if (this._length >= 2) {
+        const value = this._data_view.getInt16(this._offset)
+        this._length -= 2
+        this._offset += 2
+        return value
+      }
+      return undefined
     }
 
     write_int32(value: number): void {
@@ -121,11 +143,13 @@ export namespace SERDE {
     }
 
     read_int32(): number | undefined {
-      if (this._length < 4) return undefined
-      const bytes = new Uint8Array(this._buffer.subarray(this._length - 4, this._length)).reverse()
-      const value = new DataView(bytes.buffer).getInt32(0)
-      this._length -= 4
-      return value
+      if (this._length >= 4) {
+        const value = this._data_view.getInt32(this._offset)
+        this._length -= 4
+        this._offset += 4
+        return value
+      }
+      return undefined
     }
 
     write_f32(value: number): void {
@@ -135,11 +159,13 @@ export namespace SERDE {
     }
 
     read_f32(): number | undefined {
-      if (this._length < 4) return undefined
-      const bytes = new Uint8Array(this._buffer.subarray(this._length - 4, this._length)).reverse()
-      const value = new DataView(bytes.buffer).getFloat32(0)
-      this._length -= 4
-      return value
+      if (this._length >= 4) {
+        const value = this._data_view.getFloat32(this._offset)
+        this._length -= 4
+        this._offset += 4
+        return value
+      }
+      return undefined
     }
 
     write_f64(value: number): void {
@@ -149,18 +175,21 @@ export namespace SERDE {
     }
 
     read_f64(): number | undefined {
-      if (this._length < 8) return undefined
-      const bytes = new Uint8Array(this._buffer.subarray(this._length - 8, this._length)).reverse()
-      const value = new DataView(bytes.buffer).getFloat64(0)
-      this._length -= 8
-      return value
+      if (this._length >= 8) {
+        const value = this._data_view.getFloat64(this._offset)
+        this._length -= 8
+        this._offset += 8
+        return value
+      }
+      return undefined
     }
 
     private _ensure_capacity(size: number) {
       if (size > this._buffer.length) {
         const larger_buffer = new Uint8Array(size * 2)
-        larger_buffer.set(this._buffer)
+        larger_buffer.set(this._buffer.subarray(this._offset, this._length))
         this._buffer = larger_buffer
+        this._offset = 0
         this._data_view = new DataView(this._buffer.buffer)
       }
     }
@@ -169,12 +198,13 @@ export namespace SERDE {
       const byte_array = new ByteArray()
       byte_array._buffer = array
       byte_array._length = array.length
+      byte_array._offset = 0
       byte_array._data_view = new DataView(array.buffer)
       return byte_array
     }
 
     to_uint8array() {
-      return this._buffer.subarray(0, this._length)
+      return this._buffer.subarray(this._offset, this._length)
     }
   }
 
@@ -226,7 +256,7 @@ export namespace SERDE {
       }
       yield
     }
-    return ByteArray.from_uint8array(new Uint8Array(result).reverse())
+    return ByteArray.from_uint8array(new Uint8Array(result))
   }
 }
 
@@ -769,7 +799,7 @@ export namespace IPC {
         const terminate = NET.listen(`ipc:${$._from}:${channel}:handle`, ConnectionSerializer, function* (data) {
           if (data.from === $._to) {
             const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
-            const stream = SERDE.ByteArray.from_uint8array(bytes.reverse())
+            const stream = SERDE.ByteArray.from_uint8array(bytes)
             const value = yield* deserializer.deserialize(stream)
             resolve(value)
             terminate()
@@ -783,7 +813,7 @@ export namespace IPC {
       const terminate = NET.listen(`ipc:${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
           const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
-          const stream = SERDE.ByteArray.from_uint8array(bytes.reverse())
+          const stream = SERDE.ByteArray.from_uint8array(bytes)
           const value = yield* deserializer.deserialize(stream)
           listener(value)
         }
@@ -797,7 +827,7 @@ export namespace IPC {
       const terminate = NET.listen(`ipc:${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
           const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
-          const stream = SERDE.ByteArray.from_uint8array(bytes.reverse())
+          const stream = SERDE.ByteArray.from_uint8array(bytes)
           const value = yield* deserializer.deserialize(stream)
           listener(value)
           terminate()
@@ -817,7 +847,7 @@ export namespace IPC {
       const terminate = NET.listen(`ipc:${$._from}:${channel}:invoke`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
           const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
-          const stream = SERDE.ByteArray.from_uint8array(bytes.reverse())
+          const stream = SERDE.ByteArray.from_uint8array(bytes)
           const value = yield* deserializer.deserialize(stream)
           const result = listener(value)
           const return_stream = new SERDE.ByteArray()
@@ -970,7 +1000,7 @@ export namespace IPC {
             const terminate = NET.listen(`ipc:${$._id}:${channel}:handle`, ConnectionSerializer, function* (data) {
               if (data.from === key) {
                 const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-                const stream = SERDE.ByteArray.from_uint8array(bytes.reverse())
+                const stream = SERDE.ByteArray.from_uint8array(bytes)
                 const value = yield* deserializer.deserialize(stream)
                 resolve(value)
                 terminate()
@@ -988,7 +1018,7 @@ export namespace IPC {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
           const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-          const stream = SERDE.ByteArray.from_uint8array(bytes.reverse())
+          const stream = SERDE.ByteArray.from_uint8array(bytes)
           const value = yield* deserializer.deserialize(stream)
           listener(value)
         }
@@ -1001,7 +1031,7 @@ export namespace IPC {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
           const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-          const stream = SERDE.ByteArray.from_uint8array(bytes.reverse())
+          const stream = SERDE.ByteArray.from_uint8array(bytes)
           const value = yield* deserializer.deserialize(stream)
           listener(value)
           terminate()
@@ -1021,7 +1051,7 @@ export namespace IPC {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
           const input_bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-          const input_stream = SERDE.ByteArray.from_uint8array(input_bytes.reverse())
+          const input_stream = SERDE.ByteArray.from_uint8array(input_bytes)
           const input_value = yield* deserializer.deserialize(input_stream)
           const result = listener(input_value)
           const output_stream = new SERDE.ByteArray()
