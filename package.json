@@ -15,7 +15,7 @@
   "type": "module",
   "main": "dist/ipc.js",
   "types": "dist/ipc.d.ts",
-  "files": ["dist"],
+  "files": ["dist/ipc.js", "dist/ipc.d.ts"],
   "scripts": {
     "build": "tsc && uglifyjs dist/ipc.js --mangle --compress --output dist/ipc.min.js",
     "format": "prettier --write src",
