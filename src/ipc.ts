@@ -250,7 +250,9 @@ export namespace SERDE {
         const char_code = str.charCodeAt(j)
         if (char_code === '?'.charCodeAt(0) && j + 2 < str.length) {
           const hex = str.slice(j + 1, j + 3)
-          result.push(parseInt(hex, 16))
+          const hex_code = parseInt(hex, 16)
+          result.push(hex_code & 0xff)
+          result.push(hex_code >> 8)
           j += 2
         } else {
           result.push(char_code & 0xff)
