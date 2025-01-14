@@ -3,7 +3,7 @@
   "author": "OmniacDev",
   "description": "IPC system for MCBE Script API projects",
   "license": "MIT",
-  "version": "2.0.1",
+  "version": "3.0.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/OmniacDev/mcbe-ipc.git"
