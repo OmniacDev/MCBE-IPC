@@ -326,6 +326,10 @@ namespace CRYPTO {
 }
 
 export class Proto {
+  static Void: NET.Serializable<void> = {
+    *serialize() {},
+    *deserialize() {}
+  }
   static Int8: NET.Serializable<number> = {
     *serialize(value, stream) {
       stream.write_int8(value)
@@ -573,12 +577,11 @@ export class Proto {
 }
 
 export namespace NET {
-  export interface Serializable<T = any> {
-    serialize(value: T, stream: ByteArray): Generator<void, void, void>
-    deserialize(stream: ByteArray): Generator<void, T, void>
+  export interface Serializable<T> {
+    serialize(value: T, stream: SERDE.ByteArray): Generator<void, void, void>
+    deserialize(stream: SERDE.ByteArray): Generator<void, T, void>
   }
 
-  import ByteArray = SERDE.ByteArray
   const FRAG_MAX: number = 2048
 
   type Endpoint = string
@@ -602,13 +605,13 @@ export namespace NET {
       (function* () {
         const [serialized_endpoint, serialized_header] = event.id.split(':')
 
-        const endpoint_stream: ByteArray = yield* SERDE.deserialize([serialized_endpoint])
+        const endpoint_stream: SERDE.ByteArray = yield* SERDE.deserialize([serialized_endpoint])
 
         const endpoint: Endpoint = yield* Proto.String.deserialize(endpoint_stream)
 
         const listeners = endpoint_map.get(endpoint)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
-          const header_stream: ByteArray = yield* SERDE.deserialize([serialized_header])
+          const header_stream: SERDE.ByteArray = yield* SERDE.deserialize([serialized_header])
 
           const header: Header = yield* Header.deserialize(header_stream)
           for (let i = 0; i < listeners.length; i++) {
@@ -650,7 +653,7 @@ export namespace NET {
   export function* emit<T>(endpoint: string, serializer: Serializable<T>, value: T): Generator<void, void, void> {
     const guid = generate_id()
 
-    const endpoint_stream = new ByteArray()
+    const endpoint_stream = new SERDE.ByteArray()
     yield* Proto.String.serialize(endpoint, endpoint_stream)
     const [serialized_endpoint] = yield* SERDE.serialize(endpoint_stream)
 
@@ -663,7 +666,7 @@ export namespace NET {
         .runCommand(`scriptevent ${serialized_endpoint}:${serialized_header} ${serialized_packet}`)
     }
 
-    const packet_stream = new ByteArray()
+    const packet_stream = new SERDE.ByteArray()
     yield* serializer.serialize(value, packet_stream)
 
     const serialized_packets = yield* SERDE.serialize(packet_stream, FRAG_MAX)
