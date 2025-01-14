@@ -583,14 +583,14 @@ export namespace NET {
   type Listener = (header: Header, serialized_packet: string) => Generator<void, void, void>
   interface Header {
     guid: string
-    index?: number
-    final?: boolean
+    index: number
+    final: boolean
   }
 
-  const Header: Serializable<Header> = Proto.Object({
+  const Header: Serializable<Header> = Proto.Object<Header>({
     guid: Proto.String,
-    index: Proto.Optional(Proto.VarInt),
-    final: Proto.Optional(Proto.Boolean)
+    index: Proto.VarInt,
+    final: Proto.Boolean
   })
 
   const endpoint_map = new Map<Endpoint, Array<Listener>>()
@@ -668,10 +668,7 @@ export namespace NET {
     for (let i = 0; i < serialized_packets.length; i++) {
       const serialized_packet = serialized_packets[i]
 
-      if (serialized_packets.length === 1) yield* RUN({ guid }, serialized_packet)
-      else if (i === serialized_packets.length - 1) yield* RUN({ guid, index: i, final: true }, serialized_packet)
-      else yield* RUN({ guid, index: i }, serialized_packet)
-      yield
+      yield* RUN({ guid, index: i, final: i === serialized_packets.length - 1 }, serialized_packet)
     }
   }
 
@@ -682,28 +679,24 @@ export namespace NET {
   ) {
     const buffer = new Map<string, { size: number; serialized_packets: string[]; data_size: number }>()
     const listener: Listener = function* (payload: Header, serialized_packet: string): Generator<void, void, void> {
-      if (payload.index === undefined) {
-        const packet_stream = yield* SERDE.deserialize([serialized_packet])
-        const value = yield* serializer.deserialize(packet_stream)
+      let fragment = buffer.get(payload.guid)
+      if (!fragment) {
+        fragment = { size: -1, serialized_packets: [], data_size: 0 }
+        buffer.set(payload.guid, fragment)
+      }
+
+      if (payload.final) {
+        fragment.size = payload.index + 1
+      }
+      fragment.serialized_packets[payload.index] = serialized_packet
+      fragment.data_size += payload.index + 1
+
+      if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
+        const stream = yield* SERDE.deserialize(fragment.serialized_packets)
+        const value = yield* serializer.deserialize(stream)
         yield* callback(value)
-      } else {
-        let fragment = buffer.get(payload.guid)
-        if (!fragment) {
-          fragment = { size: -1, serialized_packets: [], data_size: 0 }
-          buffer.set(payload.guid, fragment)
-        }
-        if (payload.final) fragment.size = payload.index + 1
 
-        fragment.serialized_packets[payload.index] = serialized_packet
-        fragment.data_size += payload.index + 1
-
-        if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-          const stream = yield* SERDE.deserialize(fragment.serialized_packets)
-          const value = yield* serializer.deserialize(stream)
-          yield* callback(value)
-
-          buffer.delete(payload.guid)
-        }
+        buffer.delete(payload.guid)
       }
     }
     return create_listener(endpoint, listener)
