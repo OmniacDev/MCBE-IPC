@@ -23,416 +23,246 @@
  * SOFTWARE.
  */
 
-import { world, system, ScriptEventSource } from '@minecraft/server'
+import { ScriptEventSource, system, world } from '@minecraft/server'
 
-namespace IPC {
-  type SendTypes = {}
-  type InvokeTypes = {}
-  type HandleTypes = {}
+export namespace SERDE {
+  export class ByteArray {
+    private _buffer: Uint8Array
+    private _data_view: DataView
+    private _length: number
+    private _offset: number
 
-  export class Connection {
-    private readonly _from: string
-    private readonly _to: string
-    private readonly _enc: string | false
-    private readonly _terminators: Array<() => void>
-
-    private *MAYBE_ENCRYPT(args: any[]): Generator<void, any, void> {
-      return this._enc !== false ? yield* CRYPTO.encrypt(JSON.stringify(args), this._enc) : args
-    }
-    private *MAYBE_DECRYPT(args: any[]): Generator<void, any, void> {
-      return this._enc !== false ? JSON.parse(yield* CRYPTO.decrypt(args[1] as string, this._enc)) : args[1]
+    private get _end() {
+      return this._length + this._offset
     }
 
-    get from() {
-      return this._from
+    constructor(size: number = 256) {
+      this._buffer = new Uint8Array(size)
+      this._data_view = new DataView(this._buffer.buffer)
+      this._length = 0
+      this._offset = 0
     }
 
-    get to() {
-      return this._to
+    write(...values: number[]): void {
+      this._ensure_capacity(this._end + values.length)
+      this._buffer.set(values, this._end)
+      this._length += values.length
     }
 
-    constructor(from: string, to: string, encryption: string | false) {
-      this._from = from
-      this._to = to
-      this._enc = encryption
-      this._terminators = new Array<() => void>()
+    read(amount: number = 1): number[] {
+      if (this._length > 0) {
+        const max_amount = amount > this._length ? this._length : amount
+        const values = this._buffer.subarray(this._offset, this._offset + max_amount)
+        this._length -= max_amount
+        this._offset += max_amount
+        return Array.from(values)
+      }
+      return []
     }
 
-    terminate(notify: boolean = true) {
-      const $ = this
-      $._terminators.forEach(terminate => terminate())
-      $._terminators.length = 0
-      if (notify) {
-        system.runJob(NET.emit<[string]>('ipc', `${$._to}:terminate`, [$._from]))
+    write_uint8(value: number): void {
+      this._ensure_capacity(this._end + 1)
+      this._data_view.setUint8(this._end, value)
+      this._length += 1
+    }
+
+    read_uint8(): number | undefined {
+      if (this._length >= 1) {
+        const value = this._data_view.getUint8(this._offset)
+        this._length -= 1
+        this._offset += 1
+        return value
+      }
+      return undefined
+    }
+
+    write_uint16(value: number): void {
+      this._ensure_capacity(this._end + 2)
+      this._data_view.setUint16(this._end, value)
+      this._length += 2
+    }
+
+    read_uint16(): number | undefined {
+      if (this._length >= 2) {
+        const value = this._data_view.getUint16(this._offset)
+        this._length -= 2
+        this._offset += 2
+        return value
+      }
+      return undefined
+    }
+
+    write_uint32(value: number): void {
+      this._ensure_capacity(this._end + 4)
+      this._data_view.setUint32(this._end, value)
+      this._length += 4
+    }
+
+    read_uint32(): number | undefined {
+      if (this._length >= 4) {
+        const value = this._data_view.getUint32(this._offset)
+        this._length -= 4
+        this._offset += 4
+        return value
+      }
+      return undefined
+    }
+
+    write_int8(value: number): void {
+      this._ensure_capacity(this._end + 1)
+      this._data_view.setInt8(this._end, value)
+      this._length += 1
+    }
+
+    read_int8(): number | undefined {
+      if (this._length >= 1) {
+        const value = this._data_view.getInt8(this._offset)
+        this._length -= 1
+        this._offset += 1
+        return value
+      }
+      return undefined
+    }
+
+    write_int16(value: number): void {
+      this._ensure_capacity(this._end + 2)
+      this._data_view.setInt16(this._end, value)
+      this._length += 2
+    }
+
+    read_int16(): number | undefined {
+      if (this._length >= 2) {
+        const value = this._data_view.getInt16(this._offset)
+        this._length -= 2
+        this._offset += 2
+        return value
+      }
+      return undefined
+    }
+
+    write_int32(value: number): void {
+      this._ensure_capacity(this._end + 4)
+      this._data_view.setInt32(this._end, value)
+      this._length += 4
+    }
+
+    read_int32(): number | undefined {
+      if (this._length >= 4) {
+        const value = this._data_view.getInt32(this._offset)
+        this._length -= 4
+        this._offset += 4
+        return value
+      }
+      return undefined
+    }
+
+    write_f32(value: number): void {
+      this._ensure_capacity(this._end + 4)
+      this._data_view.setFloat32(this._end, value)
+      this._length += 4
+    }
+
+    read_f32(): number | undefined {
+      if (this._length >= 4) {
+        const value = this._data_view.getFloat32(this._offset)
+        this._length -= 4
+        this._offset += 4
+        return value
+      }
+      return undefined
+    }
+
+    write_f64(value: number): void {
+      this._ensure_capacity(this._end + 8)
+      this._data_view.setFloat64(this._end, value)
+      this._length += 8
+    }
+
+    read_f64(): number | undefined {
+      if (this._length >= 8) {
+        const value = this._data_view.getFloat64(this._offset)
+        this._length -= 8
+        this._offset += 8
+        return value
+      }
+      return undefined
+    }
+
+    private _ensure_capacity(size: number) {
+      if (size > this._buffer.length) {
+        const larger_buffer = new Uint8Array(size * 2)
+        larger_buffer.set(this._buffer.subarray(this._offset, this._end), 0)
+        this._buffer = larger_buffer
+        this._offset = 0
+        this._data_view = new DataView(this._buffer.buffer)
       }
     }
 
-    send<T extends any[]>(channel: string, ...args: T): void {
-      const $ = this
-      system.runJob(
-        (function* () {
-          const data = yield* $.MAYBE_ENCRYPT(args)
-          yield* NET.emit('ipc', `${$._to}:${channel}:send`, [$._from, data])
-        })()
-      )
+    static from_uint8array(array: Uint8Array) {
+      const byte_array = new ByteArray()
+      byte_array._buffer = array
+      byte_array._length = array.length
+      byte_array._offset = 0
+      byte_array._data_view = new DataView(array.buffer)
+      return byte_array
     }
 
-    invoke<T extends any[], R extends any>(channel: string, ...args: T): Promise<R> {
-      const $ = this
-      system.runJob(
-        (function* () {
-          const data = yield* $.MAYBE_ENCRYPT(args)
-          yield* NET.emit('ipc', `${$._to}:${channel}:invoke`, [$._from, data])
-        })()
-      )
-
-      return new Promise(resolve => {
-        const terminate = NET.listen('ipc', `${$._from}:${channel}:handle`, function* (args) {
-          if (args[0] === $._to) {
-            const data = yield* $.MAYBE_DECRYPT(args)
-            resolve(data)
-            terminate()
-          }
-        })
-      })
-    }
-
-    on<T extends any[]>(channel: string, listener: (...args: T) => void) {
-      const $ = this
-      const terminate = NET.listen('ipc', `${$._from}:${channel}:send`, function* (args) {
-        if (args[0] === $._to) {
-          const data = yield* $.MAYBE_DECRYPT(args)
-          listener(...data)
-        }
-      })
-      $._terminators.push(terminate)
-      return terminate
-    }
-
-    once<T extends any[]>(channel: string, listener: (...args: T) => void) {
-      const $ = this
-      const terminate = NET.listen('ipc', `${$._from}:${channel}:send`, function* (args) {
-        if (args[0] === $._to) {
-          const data = yield* $.MAYBE_DECRYPT(args)
-          listener(...data)
-          terminate()
-        }
-      })
-      $._terminators.push(terminate)
-      return terminate
-    }
-
-    handle<T extends any[], R extends any>(channel: string, listener: (...args: T) => R) {
-      const $ = this
-      const terminate = NET.listen('ipc', `${$._from}:${channel}:invoke`, function* (args) {
-        if (args[0] === $._to) {
-          const data = yield* $.MAYBE_DECRYPT(args)
-          const result = listener(...data)
-          const return_data = yield* $.MAYBE_ENCRYPT([result])
-          yield* NET.emit('ipc', `${$._to}:${channel}:handle`, [$._from, return_data])
-        }
-      })
-      $._terminators.push(terminate)
-      return terminate
+    to_uint8array() {
+      return this._buffer.subarray(this._offset, this._end)
     }
   }
 
-  export class ConnectionManager {
-    private readonly _id: string
-    private readonly _enc_map: Map<string, string | false>
-    private readonly _con_map: Map<string, Connection>
-    private readonly _enc_force: boolean
+  export function* serialize(byte_array: ByteArray, max_size: number = Infinity): Generator<void, string[], void> {
+    const uint8array = byte_array.to_uint8array()
+    const result: string[] = []
 
-    private *MAYBE_ENCRYPT(args: any[], encryption: string | false): Generator<void, any, void> {
-      return encryption !== false ? yield* CRYPTO.encrypt(JSON.stringify(args), encryption) : args
-    }
-    private *MAYBE_DECRYPT(args: any[], encryption: string | false): Generator<void, any, void> {
-      return encryption !== false ? JSON.parse(yield* CRYPTO.decrypt(args[1] as string, encryption)) : args[1]
-    }
-
-    get id() {
-      return this._id
-    }
-
-    constructor(id: string, force_encryption: boolean = false) {
-      const $ = this
-      this._id = id
-      this._enc_map = new Map<string, string | false>()
-      this._con_map = new Map<string, Connection>()
-      this._enc_force = force_encryption
-      NET.listen<[string, number, string, number, number]>('ipc', `${this._id}:handshake:SYN`, function* (args) {
-        const secret = CRYPTO.make_secret(args[4])
-        const public_key = yield* CRYPTO.make_public(secret, args[4], args[3])
-        const enc = args[1] === 1 || $._enc_force ? yield* CRYPTO.make_shared(secret, args[2], args[3]) : false
-        $._enc_map.set(args[0], enc)
-        yield* NET.emit<[string, number, string]>('ipc', `${args[0]}:handshake:ACK`, [
-          $._id,
-          $._enc_force ? 1 : 0,
-          public_key
-        ])
-      })
-
-      NET.listen<[string]>('ipc', `${this._id}:terminate`, function* (args) {
-        $._enc_map.delete(args[0])
-      })
-    }
-
-    connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
-      const $ = this
-      return new Promise((resolve, reject) => {
-        const con = this._con_map.get(to)
-        if (con !== undefined) {
-          con.terminate(false)
-          resolve(con)
-        } else {
-          const secret = CRYPTO.make_secret()
-          const enc_flag = encrypted ? 1 : 0
-          system.runJob(
-            (function* () {
-              const public_key = yield* CRYPTO.make_public(secret)
-              yield* NET.emit<[string, number, string, number, number]>('ipc', `${to}:handshake:SYN`, [
-                $._id,
-                enc_flag,
-                public_key,
-                CRYPTO.PRIME,
-                CRYPTO.MOD
-              ])
-            })()
-          )
-          function clear() {
-            terminate()
-            system.clearRun(timeout_handle)
-          }
-          const timeout_handle = system.runTimeout(() => {
-            reject()
-            clear()
-          }, timeout)
-          const terminate = NET.listen<[string, number, string]>('ipc', `${this._id}:handshake:ACK`, function* (args) {
-            if (args[0] === to) {
-              const enc = args[1] === 1 || encrypted ? yield* CRYPTO.make_shared(secret, args[2]) : false
-              const new_con = new Connection($._id, to, enc)
-              $._con_map.set(to, new_con)
-              resolve(new_con)
-              clear()
-            }
-          })
-        }
-      })
-    }
-
-    send<T extends any[]>(channel: string, ...args: T): void {
-      const $ = this
-      system.runJob(
-        (function* () {
-          for (const [key, value] of $._enc_map) {
-            const data = yield* $.MAYBE_ENCRYPT(args, value)
-            yield* NET.emit('ipc', `${key}:${channel}:send`, [$._id, data])
-          }
-        })()
-      )
-    }
-
-    invoke<T extends any[], R extends any>(channel: string, ...args: T): Promise<R>[] {
-      const $ = this
-      const promises: Promise<any>[] = []
-
-      for (const [key, value] of $._enc_map) {
-        system.runJob(
-          (function* () {
-            const data = yield* $.MAYBE_ENCRYPT(args, value)
-            yield* NET.emit('ipc', `${key}:${channel}:invoke`, [$._id, data])
-          })()
-        )
-
-        promises.push(
-          new Promise(resolve => {
-            const terminate = NET.listen('ipc', `${$._id}:${channel}:handle`, function* (args) {
-              if (args[0] === key) {
-                const data = yield* $.MAYBE_DECRYPT(args, value)
-                resolve(data)
-                terminate()
-              }
-            })
-          })
-        )
+    let acc_str: string = ''
+    let acc_size: number = 0
+    for (let i = 0; i < uint8array.length; i++) {
+      const char_code = uint8array[i] | (uint8array[++i] << 8)
+      const utf16_size = char_code <= 0x7f ? 1 : char_code <= 0x7ff ? 2 : char_code <= 0xffff ? 3 : 4
+      const char_size = char_code > 0xff ? utf16_size : 3
+      if (acc_size + char_size > max_size) {
+        result.push(acc_str)
+        acc_str = ''
+        acc_size = 0
       }
-      return promises
-    }
 
-    on<T extends any[]>(channel: string, listener: (...args: T) => void) {
-      const $ = this
-      return NET.listen('ipc', `${$._id}:${channel}:send`, function* (args) {
-        const enc = $._enc_map.get(args[0]) as string | false
-        if (enc !== undefined) {
-          const data = yield* $.MAYBE_DECRYPT(args, enc)
-          listener(...data)
-        }
-      })
-    }
-
-    once<T extends any[]>(channel: string, listener: (...args: T) => void) {
-      const $ = this
-      const terminate = NET.listen('ipc', `${$._id}:${channel}:send`, function* (args) {
-        const enc = $._enc_map.get(args[0]) as string | false
-        if (enc !== undefined) {
-          const data = yield* $.MAYBE_DECRYPT(args, enc)
-          listener(...data)
-          terminate()
-        }
-      })
-      return terminate
-    }
-
-    handle<T extends any[], R extends any>(channel: string, listener: (...args: T) => R) {
-      const $ = this
-      return NET.listen('ipc', `${$._id}:${channel}:invoke`, function* (args) {
-        const enc = $._enc_map.get(args[0]) as string | false
-        if (enc !== undefined) {
-          const data = yield* $.MAYBE_DECRYPT(args, enc)
-          const result = listener(...data)
-          const return_data = yield* $.MAYBE_ENCRYPT([result], enc)
-          yield* NET.emit('ipc', `${args[0]}:${channel}:handle`, [$._id, return_data])
-        }
-      })
-    }
-  }
-
-  /** Sends a message with `args` to `channel` */
-  export function send<C extends keyof SendTypes>(channel: C, ...args: SendTypes[C]): void
-
-  /** Sends a message with `args` to `channel` */
-  export function send<T extends any[]>(channel: string, ...args: T): void
-
-  /** Sends a message with `args` to `channel` */
-  export function send(channel: string, ...args: any[]): void {
-    system.runJob(NET.emit('ipc', `${channel}:send`, args))
-  }
-
-  /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke<C extends keyof (HandleTypes & InvokeTypes)>(
-    channel: C,
-    ...args: InvokeTypes[C]
-  ): Promise<HandleTypes[C]>
-
-  /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke<T extends any[], R extends any>(channel: string, ...args: T): Promise<R>
-
-  export function invoke(channel: string, ...args: any[]): Promise<any> {
-    system.runJob(NET.emit('ipc', `${channel}:invoke`, args))
-    return new Promise(resolve => {
-      const terminate = NET.listen('ipc', `${channel}:handle`, function* (args) {
-        resolve(args)
-        terminate()
-      })
-    })
-  }
-
-  /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<C extends keyof SendTypes>(channel: C, listener: (...args: SendTypes[C]) => void): () => void
-
-  /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<T extends any[]>(channel: string, listener: (...args: T) => void): () => void
-
-  /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on(channel: string, listener: (...args: any[]) => void): () => void {
-    return NET.listen('ipc', `${channel}:send`, function* (args) {
-      listener(...args)
-    })
-  }
-
-  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<C extends keyof SendTypes>(channel: C, listener: (...args: SendTypes[C]) => void): () => void
-
-  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<T extends any[]>(channel: string, listener: (...args: T) => void): () => void
-
-  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once(channel: string, listener: (...args: any[]) => void) {
-    const terminate = NET.listen<any[]>('ipc', `${channel}:send`, function* (args) {
-      listener(...args)
-      terminate()
-    })
-    return terminate
-  }
-
-  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle<C extends keyof (HandleTypes & InvokeTypes)>(
-    channel: C,
-    listener: (...args: InvokeTypes[C]) => HandleTypes[C]
-  ): () => void
-
-  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle<T extends any[], R extends any>(channel: string, listener: (...args: T) => R): () => void
-
-  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle(channel: string, listener: (...args: any[]) => any): () => void {
-    return NET.listen<any[]>('ipc', `${channel}:invoke`, function* (args) {
-      const result = listener(...args)
-      yield* NET.emit('ipc', `${channel}:handle`, result)
-    })
-  }
-}
-
-export default IPC
-
-namespace SERDE {
-  const INVALID_START_CODES = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57]
-  const INVALID_CODES = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-    31, 32, 33, 34, 35, 36, 37, 38, 39, 42, 43, 44, 47, 58, 59, 60, 61, 62, 63, 64, 91, 92, 93, 94, 96, 123, 124, 125,
-    126, 127
-  ]
-
-  const sequence_regex = /\?[0-9a-zA-Z.\-]{2}|[^?]+/g
-  const encoded_regex = /^\?[0-9a-zA-Z.\-]{2}$/
-
-  const BASE64 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-'
-
-  function* b64_encode(char: string): Generator<void, string, void> {
-    let encoded = ''
-    for (let code = char.charCodeAt(0); code > 0; code = Math.floor(code / 64)) {
-      encoded = BASE64[code % 64] + encoded
-      yield
-    }
-    return encoded
-  }
-
-  function* b64_decode(enc: string): Generator<void, string, void> {
-    let code = 0
-    for (let i = 0; i < enc.length; i++) {
-      code += 64 ** (enc.length - 1 - i) * BASE64.indexOf(enc[i])
-      yield
-    }
-    return String.fromCharCode(code)
-  }
-
-  export function* encode(str: string): Generator<void, string, void> {
-    let result = ''
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charAt(i)
-      const char_code = char.charCodeAt(0)
-      if ((i === 0 && INVALID_START_CODES.includes(char_code)) || INVALID_CODES.includes(char_code)) {
-        result += `?${(yield* b64_encode(char)).padStart(2, '0')}`
+      if (char_code > 0xff) {
+        acc_str += String.fromCharCode(char_code)
+        acc_size += utf16_size
       } else {
-        result += char
+        acc_str += `?${char_code.toString(16).padStart(2, '0')}`
+        acc_size += 3
       }
       yield
     }
+    result.push(acc_str)
+
     return result
   }
 
-  export function* decode(str: string): Generator<void, string, void> {
-    let result = ''
-    const seqs = str.match(sequence_regex) ?? []
-    for (let i = 0; i < seqs.length; i++) {
-      const seq = seqs[i]
-      if (seq.startsWith('?') && encoded_regex.test(seq)) result += yield* b64_decode(seq.slice(1))
-      else {
-        result += seq
+  export function* deserialize(strings: string[]): Generator<void, ByteArray, void> {
+    const result: number[] = []
+    for (let i = 0; i < strings.length; i++) {
+      const str = strings[i]
+      for (let j = 0; j < str.length; j++) {
+        const char_code = str.charCodeAt(j)
+        if (char_code === '?'.charCodeAt(0) && j + 2 < str.length) {
+          const hex = str.slice(j + 1, j + 3)
+          const hex_code = parseInt(hex, 16)
+          result.push(hex_code & 0xff)
+          result.push(hex_code >> 8)
+          j += 2
+        } else {
+          result.push(char_code & 0xff)
+          result.push(char_code >> 8)
+        }
+        yield
       }
       yield
     }
-    return result
+    return ByteArray.from_uint8array(new Uint8Array(result))
   }
 }
 
@@ -476,52 +306,324 @@ namespace CRYPTO {
     return to_HEX(yield* mod_exp(to_NUM(other), secret, prime))
   }
 
-  export function* encrypt(raw: string, key: string): Generator<void, string, void> {
-    let encrypted = ''
+  export function* encrypt(raw: Uint8Array, key: string): Generator<void, Uint8Array, void> {
+    let encrypted = new Uint8Array(raw.length)
     for (let i = 0; i < raw.length; i++) {
-      encrypted += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+      encrypted[i] = raw[i] ^ key.charCodeAt(i % key.length)
       yield
     }
     return encrypted
   }
 
-  export function* decrypt(encrypted: string, key: string): Generator<void, string, void> {
-    let decrypted = ''
+  export function* decrypt(encrypted: Uint8Array, key: string): Generator<void, Uint8Array, void> {
+    let decrypted = new Uint8Array(encrypted.length)
     for (let i = 0; i < encrypted.length; i++) {
-      decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+      decrypted[i] = encrypted[i] ^ key.charCodeAt(i % key.length)
       yield
     }
     return decrypted
   }
 }
 
+export class Proto {
+  static Int8: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      stream.write_int8(value)
+    },
+    *deserialize(stream) {
+      return stream.read_int8()!
+    }
+  }
+  static Int16: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      stream.write_int16(value)
+    },
+    *deserialize(stream) {
+      return stream.read_int16()!
+    }
+  }
+  static Int32: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      stream.write_int32(value)
+    },
+    *deserialize(stream) {
+      return stream.read_int32()!
+    }
+  }
+  static UInt8: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      stream.write_uint8(value)
+    },
+    *deserialize(stream) {
+      return stream.read_uint8()!
+    }
+  }
+  static UInt16: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      stream.write_uint16(value)
+    },
+    *deserialize(stream) {
+      return stream.read_uint16()!
+    }
+  }
+  static UInt32: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      stream.write_uint32(value)
+    },
+    *deserialize(stream) {
+      return stream.read_uint32()!
+    }
+  }
+  static Float32: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      stream.write_f32(value)
+    },
+    *deserialize(stream) {
+      return stream.read_f32()!
+    }
+  }
+  static Float64: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      stream.write_f64(value)
+    },
+    *deserialize(stream) {
+      return stream.read_f64()!
+    }
+  }
+  static VarInt: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      while (value >= 0x80) {
+        stream.write((value & 0x7f) | 0x80)
+        value >>= 7
+        yield
+      }
+      stream.write(value)
+    },
+    *deserialize(stream) {
+      let value = 0
+      let shift = 0
+      let byte
+      do {
+        byte = stream.read()[0]!
+        value |= (byte & 0x7f) << shift
+        shift += 7
+        yield
+      } while (byte & 0x80)
+      return value
+    }
+  }
+  static String: NET.Serializable<string> = {
+    *serialize(value, stream) {
+      yield* Proto.VarInt.serialize(value.length, stream)
+      for (let i = 0; i < value.length; i++) {
+        const code = value.charCodeAt(i)
+        yield* Proto.VarInt.serialize(code, stream)
+      }
+    },
+    *deserialize(stream) {
+      const length = yield* Proto.VarInt.deserialize(stream)
+      let value = ''
+      for (let i = 0; i < length; i++) {
+        const code = yield* Proto.VarInt.deserialize(stream)
+        value += String.fromCharCode(code)
+      }
+      return value
+    }
+  }
+  static Boolean: NET.Serializable<boolean> = {
+    *serialize(value, stream) {
+      stream.write(value ? 1 : 0)
+    },
+    *deserialize(stream) {
+      const value = stream.read()[0]!
+      return value === 1
+    }
+  }
+  static UInt8Array: NET.Serializable<Uint8Array> = {
+    *serialize(value: Uint8Array, stream: SERDE.ByteArray) {
+      yield* Proto.VarInt.serialize(value.length, stream)
+      for (const item of value) {
+        stream.write_uint8(item)
+        yield
+      }
+    },
+    *deserialize(stream: SERDE.ByteArray) {
+      const length = yield* Proto.VarInt.deserialize(stream)
+      const result = new Uint8Array(length)
+      for (let i = 0; i < length; i++) {
+        result[i] = stream.read_uint8()!
+      }
+      return result
+    }
+  }
+  static Date: NET.Serializable<Date> = {
+    *serialize(value: Date, stream: SERDE.ByteArray) {
+      yield* Proto.VarInt.serialize(value.getTime(), stream)
+    },
+    *deserialize(stream: SERDE.ByteArray) {
+      return new Date(yield* Proto.VarInt.deserialize(stream))
+    }
+  }
+  static Object<T extends object>(obj: { [K in keyof T]: NET.Serializable<T[K]> }): NET.Serializable<T> {
+    return {
+      *serialize(value, stream) {
+        for (const key in obj) {
+          yield* obj[key].serialize(value[key], stream)
+        }
+      },
+      *deserialize(stream) {
+        const result: Partial<T> = {}
+        for (const key in obj) {
+          result[key] = yield* obj[key].deserialize(stream)
+        }
+        return result as T
+      }
+    }
+  }
+  static Array<T>(items: NET.Serializable<T>): NET.Serializable<T[]> {
+    return {
+      *serialize(value, stream) {
+        yield* Proto.VarInt.serialize(value.length, stream)
+        for (const item of value) {
+          yield* items.serialize(item, stream)
+        }
+      },
+      *deserialize(stream) {
+        const result: T[] = []
+        const length = yield* Proto.VarInt.deserialize(stream)
+        for (let i = 0; i < length; i++) {
+          result[i] = yield* items.deserialize(stream)
+        }
+        return result
+      }
+    }
+  }
+  static Tuple<T extends any[]>(...items: { [K in keyof T]: NET.Serializable<T[K]> }): NET.Serializable<T> {
+    return {
+      *serialize(value, stream) {
+        for (let i = 0; i < items.length; i++) {
+          yield* items[i].serialize(value[i], stream)
+        }
+      },
+      *deserialize(stream) {
+        const result: any[] = []
+        for (let i = 0; i < items.length; i++) {
+          result[i] = yield* items[i].deserialize(stream)
+        }
+        return result as T
+      }
+    }
+  }
+  static Optional<T>(item: NET.Serializable<T>): NET.Serializable<T | undefined> {
+    return {
+      *serialize(value, stream) {
+        yield* Proto.Boolean.serialize(value !== undefined, stream)
+        if (value !== undefined) {
+          yield* item.serialize(value, stream)
+        }
+      },
+      *deserialize(stream) {
+        const defined = yield* Proto.Boolean.deserialize(stream)
+        if (defined) {
+          return yield* item.deserialize(stream)
+        }
+      }
+    }
+  }
+  static Map<K, V>(key: NET.Serializable<K>, value: NET.Serializable<V>): NET.Serializable<Map<K, V>> {
+    return {
+      *serialize(map, stream) {
+        yield* Proto.VarInt.serialize(map.size, stream)
+        for (const [k, v] of map.entries()) {
+          yield* key.serialize(k, stream)
+          yield* value.serialize(v, stream)
+        }
+      },
+      *deserialize(stream) {
+        const size = yield* Proto.VarInt.deserialize(stream)
+        const result = new Map<K, V>()
+        for (let i = 0; i < size; i++) {
+          const k = yield* key.deserialize(stream)
+          const v = yield* value.deserialize(stream)
+          result.set(k, v)
+        }
+        return result
+      }
+    }
+  }
+  static Set<V>(value: NET.Serializable<V>): NET.Serializable<Set<V>> {
+    return {
+      *serialize(set, stream) {
+        yield* Proto.VarInt.serialize(set.size, stream)
+        for (const [_, v] of set.entries()) {
+          yield* value.serialize(v, stream)
+        }
+      },
+      *deserialize(stream) {
+        const size = yield* Proto.VarInt.deserialize(stream)
+        const result = new Set<V>()
+        for (let i = 0; i < size; i++) {
+          const v = yield* value.deserialize(stream)
+          result.add(v)
+        }
+        return result
+      }
+    }
+  }
+}
+
 export namespace NET {
+  export interface Serializable<T = any> {
+    serialize(value: T, stream: ByteArray): Generator<void, void, void>
+    deserialize(stream: ByteArray): Generator<void, T, void>
+  }
+
+  import ByteArray = SERDE.ByteArray
   const FRAG_MAX: number = 2048
 
-  type Listener = (payload: Payload, data: string) => Generator<void, void, void>
-  const namespace_listeners = new Map<string, Array<Listener>>()
+  type Endpoint = string
+  type Listener = (header: Header, serialized_packet: string) => Generator<void, void, void>
+  interface Header {
+    guid: string
+    index: number
+    final: boolean
+  }
+
+  const Header: Serializable<Header> = Proto.Object<Header>({
+    guid: Proto.String,
+    index: Proto.VarInt,
+    final: Proto.Boolean
+  })
+
+  const endpoint_map = new Map<Endpoint, Array<Listener>>()
 
   system.afterEvents.scriptEventReceive.subscribe(event => {
     system.runJob(
       (function* () {
-        const ids = event.id.split(':')
-        const namespace = yield* SERDE.decode(ids[0])
-        const listeners = namespace_listeners.get(namespace)
+        const [serialized_endpoint, serialized_header] = event.id.split(':')
+
+        const endpoint_stream: ByteArray = yield* SERDE.deserialize([serialized_endpoint])
+
+        const endpoint: Endpoint = yield* Proto.String.deserialize(endpoint_stream)
+
+        const listeners = endpoint_map.get(endpoint)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
-          const payload = Payload.fromString(yield* SERDE.decode(ids[1]))
+          const header_stream: ByteArray = yield* SERDE.deserialize([serialized_header])
+
+          const header: Header = yield* Header.deserialize(header_stream)
           for (let i = 0; i < listeners.length; i++) {
-            yield* listeners[i](payload, event.message)
+            yield* listeners[i](header, event.message)
           }
         }
       })()
     )
   })
 
-  function create_listener(namespace: string, listener: Listener) {
-    let listeners = namespace_listeners.get(namespace)
+  function create_listener(endpoint: Endpoint, listener: Listener) {
+    let listeners = endpoint_map.get(endpoint)
     if (!listeners) {
       listeners = new Array<Listener>()
-      namespace_listeners.set(namespace, listeners)
+      endpoint_map.set(endpoint, listeners)
     }
     listeners.push(listener)
 
@@ -530,22 +632,8 @@ export namespace NET {
       if (idx !== -1) listeners.splice(idx, 1)
 
       if (listeners.length === 0) {
-        namespace_listeners.delete(namespace)
+        endpoint_map.delete(endpoint)
       }
-    }
-  }
-
-  type Payload =
-    | [channel: string, id: string]
-    | [channel: string, id: string, index: number]
-    | [channel: string, id: string, index: number, final: number]
-
-  namespace Payload {
-    export function toString(p: Payload): string {
-      return JSON.stringify(p)
-    }
-    export function fromString(s: string): Payload {
-      return JSON.parse(s)
     }
   }
 
@@ -559,75 +647,473 @@ export namespace NET {
     ).toUpperCase()
   }
 
-  export function* emit<T = any>(namespace: string, channel: string, args: T): Generator<void, void, void> {
-    const id = generate_id()
-    const enc_namespace = yield* SERDE.encode(namespace)
-    const enc_args_str = yield* SERDE.encode(JSON.stringify(args))
+  export function* emit<T>(endpoint: string, serializer: Serializable<T>, value: T): Generator<void, void, void> {
+    const guid = generate_id()
 
-    const RUN = function* (payload: Payload, data_str: string) {
-      const enc_payload = yield* SERDE.encode(Payload.toString(payload))
-      world.getDimension('overworld').runCommand(`scriptevent ${enc_namespace}:${enc_payload} ${data_str}`)
+    const endpoint_stream = new ByteArray()
+    yield* Proto.String.serialize(endpoint, endpoint_stream)
+    const [serialized_endpoint] = yield* SERDE.serialize(endpoint_stream)
+
+    const RUN = function* (header: Header, serialized_packet: string) {
+      const header_stream = new SERDE.ByteArray()
+      yield* Header.serialize(header, header_stream)
+      const [serialized_header] = yield* SERDE.serialize(header_stream)
+      world
+        .getDimension('overworld')
+        .runCommand(`scriptevent ${serialized_endpoint}:${serialized_header} ${serialized_packet}`)
     }
 
-    let len = 0
-    let str = ''
-    let str_size = 0
-    for (let i = 0; i < enc_args_str.length; i++) {
-      const char = enc_args_str[i]
-      const code = char.charCodeAt(0)
-      const char_size = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4
+    const packet_stream = new ByteArray()
+    yield* serializer.serialize(value, packet_stream)
 
-      if (str_size + char_size < FRAG_MAX) {
-        str += char
-        str_size += char_size
-      } else {
-        yield* RUN([channel, id, len], str)
-        len++
-        str = char
-        str_size = char_size
-      }
-      yield
+    const serialized_packets = yield* SERDE.serialize(packet_stream, FRAG_MAX)
+    for (let i = 0; i < serialized_packets.length; i++) {
+      const serialized_packet = serialized_packets[i]
+
+      yield* RUN({ guid, index: i, final: i === serialized_packets.length - 1 }, serialized_packet)
     }
-
-    yield* RUN(len === 0 ? [channel, id] : [channel, id, len, 1], str)
   }
 
-  export function listen<T = any>(
-    namespace: string,
-    channel: string,
-    callback: (args: T) => Generator<void, void, void>
+  export function listen<T>(
+    endpoint: string,
+    serializer: Serializable<T>,
+    callback: (value: T) => Generator<void, void, void>
   ) {
-    const buffer = new Map<string, { size: number; data_strs: string[]; data_size: number }>()
-    const listener = function* (
-      [p_channel, p_id, p_index, p_final]: Payload,
-      data: string
-    ): Generator<void, void, void> {
-      if (p_channel === channel) {
-        if (p_index === undefined) {
-          yield* callback(JSON.parse(yield* SERDE.decode(data)))
-        } else {
-          let fragment = buffer.get(p_id)
-          if (!fragment) {
-            fragment = { size: -1, data_strs: [], data_size: 0 }
-            buffer.set(p_id, fragment)
-          }
-          if (p_final === 1) fragment.size = p_index + 1
+    const buffer = new Map<string, { size: number; serialized_packets: string[]; data_size: number }>()
+    const listener: Listener = function* (payload: Header, serialized_packet: string): Generator<void, void, void> {
+      let fragment = buffer.get(payload.guid)
+      if (!fragment) {
+        fragment = { size: -1, serialized_packets: [], data_size: 0 }
+        buffer.set(payload.guid, fragment)
+      }
 
-          fragment.data_strs[p_index] = data
-          fragment.data_size += p_index + 1
+      if (payload.final) {
+        fragment.size = payload.index + 1
+      }
+      fragment.serialized_packets[payload.index] = serialized_packet
+      fragment.data_size += payload.index + 1
 
-          if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-            let full_str = ''
-            for (let i = 0; i < fragment.data_strs.length; i++) {
-              full_str += fragment.data_strs[i]
-              yield
-            }
-            yield* callback(JSON.parse(yield* SERDE.decode(full_str)))
-            buffer.delete(p_id)
-          }
-        }
+      if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
+        const stream = yield* SERDE.deserialize(fragment.serialized_packets)
+        const value = yield* serializer.deserialize(stream)
+        yield* callback(value)
+
+        buffer.delete(payload.guid)
       }
     }
-    return create_listener(namespace, listener)
+    return create_listener(endpoint, listener)
   }
 }
+
+export namespace IPC {
+  const ConnectionSerializer = Proto.Object({
+    from: Proto.String,
+    bytes: Proto.UInt8Array
+  })
+  const HandshakeSynchronizeSerializer = Proto.Object({
+    from: Proto.String,
+    encryption_enabled: Proto.Boolean,
+    encryption_public_key: Proto.String,
+    encryption_prime: Proto.VarInt,
+    encryption_modulus: Proto.VarInt
+  })
+  const HandshakeAcknowledgeSerializer = Proto.Object({
+    from: Proto.String,
+    encryption_enabled: Proto.Boolean,
+    encryption_public_key: Proto.String
+  })
+
+  export class Connection {
+    private readonly _from: string
+    private readonly _to: string
+    private readonly _enc: string | false
+    private readonly _terminators: Array<() => void>
+
+    private *MAYBE_ENCRYPT(bytes: Uint8Array): Generator<void, Uint8Array, void> {
+      return this._enc !== false ? yield* CRYPTO.encrypt(bytes, this._enc) : bytes
+    }
+    private *MAYBE_DECRYPT(bytes: Uint8Array): Generator<void, Uint8Array, void> {
+      return this._enc !== false ? yield* CRYPTO.decrypt(bytes, this._enc) : bytes
+    }
+
+    get from() {
+      return this._from
+    }
+
+    get to() {
+      return this._to
+    }
+
+    constructor(from: string, to: string, encryption: string | false) {
+      this._from = from
+      this._to = to
+      this._enc = encryption
+      this._terminators = new Array<() => void>()
+    }
+
+    terminate(notify: boolean = true) {
+      const $ = this
+      $._terminators.forEach(terminate => terminate())
+      $._terminators.length = 0
+      if (notify) {
+        system.runJob(NET.emit(`ipc:${$._to}:terminate`, Proto.String, $._from))
+      }
+    }
+
+    send<T>(channel: string, serializer: NET.Serializable<T>, value: T): void {
+      const $ = this
+      system.runJob(
+        (function* () {
+          const stream = new SERDE.ByteArray()
+          yield* serializer.serialize(value, stream)
+          const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array())
+          yield* NET.emit(`ipc:${$._to}:${channel}:send`, ConnectionSerializer, {
+            from: $._from,
+            bytes
+          })
+        })()
+      )
+    }
+
+    invoke<T, R>(
+      channel: string,
+      serializer: NET.Serializable<T>,
+      value: T,
+      deserializer: NET.Serializable<R>
+    ): Promise<R> {
+      const $ = this
+      system.runJob(
+        (function* () {
+          const stream = new SERDE.ByteArray()
+          yield* serializer.serialize(value, stream)
+          const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array())
+          yield* NET.emit(`ipc:${$._to}:${channel}:invoke`, ConnectionSerializer, {
+            from: $._from,
+            bytes
+          })
+        })()
+      )
+
+      return new Promise(resolve => {
+        const terminate = NET.listen(`ipc:${$._from}:${channel}:handle`, ConnectionSerializer, function* (data) {
+          if (data.from === $._to) {
+            const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+            const stream = SERDE.ByteArray.from_uint8array(bytes)
+            const value = yield* deserializer.deserialize(stream)
+            resolve(value)
+            terminate()
+          }
+        })
+      })
+    }
+
+    on<T>(channel: string, deserializer: NET.Serializable<T>, listener: (value: T) => void) {
+      const $ = this
+      const terminate = NET.listen(`ipc:${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
+        if (data.from === $._to) {
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+          const stream = SERDE.ByteArray.from_uint8array(bytes)
+          const value = yield* deserializer.deserialize(stream)
+          listener(value)
+        }
+      })
+      $._terminators.push(terminate)
+      return terminate
+    }
+
+    once<T>(channel: string, deserializer: NET.Serializable<T>, listener: (value: T) => void) {
+      const $ = this
+      const terminate = NET.listen(`ipc:${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
+        if (data.from === $._to) {
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+          const stream = SERDE.ByteArray.from_uint8array(bytes)
+          const value = yield* deserializer.deserialize(stream)
+          listener(value)
+          terminate()
+        }
+      })
+      $._terminators.push(terminate)
+      return terminate
+    }
+
+    handle<T, R>(
+      channel: string,
+      deserializer: NET.Serializable<T>,
+      serializer: NET.Serializable<R>,
+      listener: (value: T) => R
+    ) {
+      const $ = this
+      const terminate = NET.listen(`ipc:${$._from}:${channel}:invoke`, ConnectionSerializer, function* (data) {
+        if (data.from === $._to) {
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
+          const stream = SERDE.ByteArray.from_uint8array(bytes)
+          const value = yield* deserializer.deserialize(stream)
+          const result = listener(value)
+          const return_stream = new SERDE.ByteArray()
+          yield* serializer.serialize(result, return_stream)
+          const return_bytes = yield* $.MAYBE_ENCRYPT(return_stream.to_uint8array())
+          yield* NET.emit(`ipc:${$._to}:${channel}:handle`, ConnectionSerializer, {
+            from: $._from,
+            bytes: return_bytes
+          })
+        }
+      })
+      $._terminators.push(terminate)
+      return terminate
+    }
+  }
+
+  export class ConnectionManager {
+    private readonly _id: string
+    private readonly _enc_map: Map<string, string | false>
+    private readonly _con_map: Map<string, Connection>
+    private readonly _enc_force: boolean
+
+    private *MAYBE_ENCRYPT(bytes: Uint8Array, encryption: string | false): Generator<void, Uint8Array, void> {
+      return encryption !== false ? yield* CRYPTO.encrypt(bytes, encryption) : bytes
+    }
+    private *MAYBE_DECRYPT(bytes: Uint8Array, encryption: string | false): Generator<void, Uint8Array, void> {
+      return encryption !== false ? yield* CRYPTO.decrypt(bytes, encryption) : bytes
+    }
+
+    get id() {
+      return this._id
+    }
+
+    constructor(id: string, force_encryption: boolean = false) {
+      const $ = this
+      this._id = id
+      this._enc_map = new Map<string, string | false>()
+      this._con_map = new Map<string, Connection>()
+      this._enc_force = force_encryption
+      NET.listen(`ipc:${this._id}:handshake:synchronize`, HandshakeSynchronizeSerializer, function* (data) {
+        const secret = CRYPTO.make_secret(data.encryption_modulus)
+        const public_key = yield* CRYPTO.make_public(secret, data.encryption_modulus, data.encryption_prime)
+        const enc =
+          data.encryption_enabled || $._enc_force
+            ? yield* CRYPTO.make_shared(secret, data.encryption_public_key, data.encryption_prime)
+            : false
+        $._enc_map.set(data.from, enc)
+        yield* NET.emit(`ipc:${data.from}:handshake:acknowledge`, HandshakeAcknowledgeSerializer, {
+          from: $._id,
+          encryption_public_key: public_key,
+          encryption_enabled: $._enc_force
+        })
+      })
+
+      NET.listen(`ipc:${this._id}:terminate`, Proto.String, function* (value) {
+        $._enc_map.delete(value)
+      })
+    }
+
+    connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
+      const $ = this
+      return new Promise((resolve, reject) => {
+        const con = this._con_map.get(to)
+        if (con !== undefined) {
+          con.terminate(false)
+          resolve(con)
+        } else {
+          const secret = CRYPTO.make_secret()
+          system.runJob(
+            (function* () {
+              const public_key = yield* CRYPTO.make_public(secret)
+              yield* NET.emit(`ipc:${to}:handshake:synchronize`, HandshakeSynchronizeSerializer, {
+                from: $._id,
+                encryption_enabled: encrypted,
+                encryption_public_key: public_key,
+                encryption_prime: CRYPTO.PRIME,
+                encryption_modulus: CRYPTO.MOD
+              })
+            })()
+          )
+          function clear() {
+            terminate()
+            system.clearRun(timeout_handle)
+          }
+          const timeout_handle = system.runTimeout(() => {
+            reject()
+            clear()
+          }, timeout)
+          const terminate = NET.listen(
+            `ipc:${this._id}:handshake:acknowledge`,
+            HandshakeAcknowledgeSerializer,
+            function* (data) {
+              if (data.from === to) {
+                const enc =
+                  data.encryption_enabled || encrypted
+                    ? yield* CRYPTO.make_shared(secret, data.encryption_public_key)
+                    : false
+                const new_con = new Connection($._id, to, enc)
+                $._con_map.set(to, new_con)
+                resolve(new_con)
+                clear()
+              }
+            }
+          )
+        }
+      })
+    }
+
+    send<T>(channel: string, serializer: NET.Serializable<T>, value: T): void {
+      const $ = this
+      system.runJob(
+        (function* () {
+          for (const [key, enc] of $._enc_map) {
+            const stream = new SERDE.ByteArray()
+            yield* serializer.serialize(value, stream)
+            const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array(), enc)
+            yield* NET.emit(`ipc:${key}:${channel}:send`, ConnectionSerializer, {
+              from: $._id,
+              bytes
+            })
+          }
+        })()
+      )
+    }
+
+    invoke<T, R>(
+      channel: string,
+      serializer: NET.Serializable<T>,
+      value: T,
+      deserializer: NET.Serializable<R>
+    ): Promise<R>[] {
+      const $ = this
+      const promises: Promise<any>[] = []
+
+      for (const [key, enc] of $._enc_map) {
+        system.runJob(
+          (function* () {
+            const stream = new SERDE.ByteArray()
+            yield* serializer.serialize(value, stream)
+            const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array(), enc)
+            yield* NET.emit(`ipc:${key}:${channel}:invoke`, ConnectionSerializer, {
+              from: $._id,
+              bytes
+            })
+          })()
+        )
+
+        promises.push(
+          new Promise(resolve => {
+            const terminate = NET.listen(`ipc:${$._id}:${channel}:handle`, ConnectionSerializer, function* (data) {
+              if (data.from === key) {
+                const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+                const stream = SERDE.ByteArray.from_uint8array(bytes)
+                const value = yield* deserializer.deserialize(stream)
+                resolve(value)
+                terminate()
+              }
+            })
+          })
+        )
+      }
+      return promises
+    }
+
+    on<T>(channel: string, deserializer: NET.Serializable<T>, listener: (value: T) => void) {
+      const $ = this
+      return NET.listen(`ipc:${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
+        const enc = $._enc_map.get(data.from) as string | false
+        if (enc !== undefined) {
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+          const stream = SERDE.ByteArray.from_uint8array(bytes)
+          const value = yield* deserializer.deserialize(stream)
+          listener(value)
+        }
+      })
+    }
+
+    once<T>(channel: string, deserializer: NET.Serializable<T>, listener: (value: T) => void) {
+      const $ = this
+      const terminate = NET.listen(`ipc:${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
+        const enc = $._enc_map.get(data.from) as string | false
+        if (enc !== undefined) {
+          const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+          const stream = SERDE.ByteArray.from_uint8array(bytes)
+          const value = yield* deserializer.deserialize(stream)
+          listener(value)
+          terminate()
+        }
+      })
+      return terminate
+    }
+
+    handle<T, R>(
+      channel: string,
+      deserializer: NET.Serializable<T>,
+      serializer: NET.Serializable<R>,
+      listener: (value: T) => R
+    ) {
+      const $ = this
+      return NET.listen(`ipc:${$._id}:${channel}:invoke`, ConnectionSerializer, function* (data) {
+        const enc = $._enc_map.get(data.from) as string | false
+        if (enc !== undefined) {
+          const input_bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
+          const input_stream = SERDE.ByteArray.from_uint8array(input_bytes)
+          const input_value = yield* deserializer.deserialize(input_stream)
+          const result = listener(input_value)
+          const output_stream = new SERDE.ByteArray()
+          yield* serializer.serialize(result, output_stream)
+          const output_bytes = yield* $.MAYBE_ENCRYPT(output_stream.to_uint8array(), enc)
+          yield* NET.emit(`ipc:${data.from}:${channel}:handle`, ConnectionSerializer, {
+            from: $._id,
+            bytes: output_bytes
+          })
+        }
+      })
+    }
+  }
+
+  /** Sends a message with `args` to `channel` */
+  export function send<T>(channel: string, serializer: NET.Serializable<T>, value: T): void {
+    system.runJob(NET.emit(`ipc:${channel}:send`, serializer, value))
+  }
+
+  /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
+  export function invoke<T, R>(
+    channel: string,
+    serializer: NET.Serializable<T>,
+    value: T,
+    deserializer: NET.Serializable<R>
+  ): Promise<R> {
+    system.runJob(NET.emit(`ipc:${channel}:invoke`, serializer, value))
+    return new Promise(resolve => {
+      const terminate = NET.listen(`ipc:${channel}:handle`, deserializer, function* (value) {
+        resolve(value)
+        terminate()
+      })
+    })
+  }
+
+  /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
+  export function on<T>(channel: string, deserializer: NET.Serializable<T>, listener: (value: T) => void): () => void {
+    return NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
+      listener(value)
+    })
+  }
+
+  /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
+  export function once<T>(channel: string, deserializer: NET.Serializable<T>, listener: (value: T) => void) {
+    const terminate = NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
+      listener(value)
+      terminate()
+    })
+    return terminate
+  }
+
+  /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
+  export function handle<T, R>(
+    channel: string,
+    deserializer: NET.Serializable<T>,
+    serializer: NET.Serializable<R>,
+    listener: (value: T) => R
+  ): () => void {
+    return NET.listen(`ipc:${channel}:invoke`, deserializer, function* (value) {
+      const result = listener(value)
+      yield* NET.emit(`ipc:${channel}:handle`, serializer, result)
+    })
+  }
+}
+
+export default IPC
