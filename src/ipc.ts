@@ -232,8 +232,8 @@ export namespace SERDE {
         acc_str += String.fromCharCode(char_code)
         acc_size += utf16_size
       } else {
-        acc_str += `?${char_code.toString(16).padStart(2, '0')}`
-        acc_size += 3
+        acc_str += char_code.toString(16).padStart(2, '0').toUpperCase()
+        acc_size += 2
       }
       yield
     }
@@ -248,12 +248,11 @@ export namespace SERDE {
       const str = strings[i]
       for (let j = 0; j < str.length; j++) {
         const char_code = str.charCodeAt(j)
-        if (char_code === '?'.charCodeAt(0) && j + 2 < str.length) {
-          const hex = str.slice(j + 1, j + 3)
+        if (char_code <= 0xff && j + 1 < str.length) {
+          const hex = str.slice(j, ++j + 1)
           const hex_code = parseInt(hex, 16)
           result.push(hex_code & 0xff)
           result.push(hex_code >> 8)
-          j += 2
         } else {
           result.push(char_code & 0xff)
           result.push(char_code >> 8)
@@ -270,7 +269,7 @@ export namespace SERDE {
 
     let str = '(0x'
     for (let i = 0; i < uint8array.length; i++) {
-      const hex = uint8array[i].toString(16).padStart(2, '0')
+      const hex = uint8array[i].toString(16).padStart(2, '0').toUpperCase()
       str += hex
       yield
     }
