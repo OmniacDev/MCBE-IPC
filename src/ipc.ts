@@ -264,6 +264,33 @@ export namespace SERDE {
     }
     return ByteArray.from_uint8array(new Uint8Array(result))
   }
+
+  export function* serialize_raw(byte_array: ByteArray): Generator<void, string, void> {
+    const uint8array = byte_array.to_uint8array()
+
+    let str = '(0x'
+    for (let i = 0; i < uint8array.length; i++) {
+      const hex = uint8array[i].toString(16).padStart(2, '0')
+      str += hex
+      yield
+    }
+    str += ')'
+    return str
+  }
+
+  export function* deserialize_raw(str: string): Generator<void, ByteArray, void> {
+    if (str.startsWith('(0x')) {
+      const result = []
+      const hex_str = str.slice(3, str.length - 1)
+      for (let i = 0; i < hex_str.length; i++) {
+        const hex = hex_str[i] + hex_str[++i]
+        result.push(parseInt(hex, 16))
+        yield
+      }
+      return ByteArray.from_uint8array(new Uint8Array(result))
+    }
+    return new ByteArray()
+  }
 }
 
 namespace CRYPTO {
@@ -394,7 +421,7 @@ export class Proto {
       return stream.read_f64()!
     }
   }
-  static VarInt: NET.Serializable<number> = {
+  static UVarInt: NET.Serializable<number> = {
     *serialize(value, stream) {
       while (value >= 0x80) {
         stream.write((value & 0x7f) | 0x80)
@@ -412,23 +439,33 @@ export class Proto {
         value |= (byte & 0x7f) << shift
         shift += 7
         yield
-      } while (byte & 0x80)
+      } while ((byte & 0x80) !== 0)
       return value
+    }
+  }
+  static VarInt: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      value = (value << 1) ^ (value >> 31)
+      yield* Proto.UVarInt.serialize(value, stream)
+    },
+    *deserialize(stream) {
+      const value = yield* Proto.UVarInt.deserialize(stream)
+      return (value >>> 1) ^ -(value & 1)
     }
   }
   static String: NET.Serializable<string> = {
     *serialize(value, stream) {
-      yield* Proto.VarInt.serialize(value.length, stream)
+      yield* Proto.UVarInt.serialize(value.length, stream)
       for (let i = 0; i < value.length; i++) {
         const code = value.charCodeAt(i)
-        yield* Proto.VarInt.serialize(code, stream)
+        yield* Proto.UVarInt.serialize(code, stream)
       }
     },
     *deserialize(stream) {
-      const length = yield* Proto.VarInt.deserialize(stream)
+      const length = yield* Proto.UVarInt.deserialize(stream)
       let value = ''
       for (let i = 0; i < length; i++) {
-        const code = yield* Proto.VarInt.deserialize(stream)
+        const code = yield* Proto.UVarInt.deserialize(stream)
         value += String.fromCharCode(code)
       }
       return value
@@ -445,14 +482,14 @@ export class Proto {
   }
   static UInt8Array: NET.Serializable<Uint8Array> = {
     *serialize(value: Uint8Array, stream: SERDE.ByteArray) {
-      yield* Proto.VarInt.serialize(value.length, stream)
+      yield* Proto.UVarInt.serialize(value.length, stream)
       for (const item of value) {
         stream.write_uint8(item)
         yield
       }
     },
     *deserialize(stream: SERDE.ByteArray) {
-      const length = yield* Proto.VarInt.deserialize(stream)
+      const length = yield* Proto.UVarInt.deserialize(stream)
       const result = new Uint8Array(length)
       for (let i = 0; i < length; i++) {
         result[i] = stream.read_uint8()!
@@ -462,10 +499,10 @@ export class Proto {
   }
   static Date: NET.Serializable<Date> = {
     *serialize(value: Date, stream: SERDE.ByteArray) {
-      yield* Proto.VarInt.serialize(value.getTime(), stream)
+      yield* Proto.UVarInt.serialize(value.getTime(), stream)
     },
     *deserialize(stream: SERDE.ByteArray) {
-      return new Date(yield* Proto.VarInt.deserialize(stream))
+      return new Date(yield* Proto.UVarInt.deserialize(stream))
     }
   }
   static Object<T extends object>(obj: { [K in keyof T]: NET.Serializable<T[K]> }): NET.Serializable<T> {
@@ -487,14 +524,14 @@ export class Proto {
   static Array<T>(items: NET.Serializable<T>): NET.Serializable<T[]> {
     return {
       *serialize(value, stream) {
-        yield* Proto.VarInt.serialize(value.length, stream)
+        yield* Proto.UVarInt.serialize(value.length, stream)
         for (const item of value) {
           yield* items.serialize(item, stream)
         }
       },
       *deserialize(stream) {
         const result: T[] = []
-        const length = yield* Proto.VarInt.deserialize(stream)
+        const length = yield* Proto.UVarInt.deserialize(stream)
         for (let i = 0; i < length; i++) {
           result[i] = yield* items.deserialize(stream)
         }
@@ -537,14 +574,14 @@ export class Proto {
   static Map<K, V>(key: NET.Serializable<K>, value: NET.Serializable<V>): NET.Serializable<Map<K, V>> {
     return {
       *serialize(map, stream) {
-        yield* Proto.VarInt.serialize(map.size, stream)
+        yield* Proto.UVarInt.serialize(map.size, stream)
         for (const [k, v] of map.entries()) {
           yield* key.serialize(k, stream)
           yield* value.serialize(v, stream)
         }
       },
       *deserialize(stream) {
-        const size = yield* Proto.VarInt.deserialize(stream)
+        const size = yield* Proto.UVarInt.deserialize(stream)
         const result = new Map<K, V>()
         for (let i = 0; i < size; i++) {
           const k = yield* key.deserialize(stream)
@@ -558,13 +595,13 @@ export class Proto {
   static Set<V>(value: NET.Serializable<V>): NET.Serializable<Set<V>> {
     return {
       *serialize(set, stream) {
-        yield* Proto.VarInt.serialize(set.size, stream)
+        yield* Proto.UVarInt.serialize(set.size, stream)
         for (const [_, v] of set.entries()) {
           yield* value.serialize(v, stream)
         }
       },
       *deserialize(stream) {
-        const size = yield* Proto.VarInt.deserialize(stream)
+        const size = yield* Proto.UVarInt.deserialize(stream)
         const result = new Set<V>()
         for (let i = 0; i < size; i++) {
           const v = yield* value.deserialize(stream)
@@ -583,18 +620,21 @@ export namespace NET {
   }
 
   const FRAG_MAX: number = 2048
+  const ENCODING: string = 'mcbe-ipc:v3'
 
   type Endpoint = string
   type Listener = (header: Header, serialized_packet: string) => Generator<void, void, void>
   interface Header {
     guid: string
+    encoding: string
     index: number
     final: boolean
   }
 
   const Header: Serializable<Header> = Proto.Object<Header>({
     guid: Proto.String,
-    index: Proto.VarInt,
+    encoding: Proto.String,
+    index: Proto.UVarInt,
     final: Proto.Boolean
   })
 
@@ -605,13 +645,13 @@ export namespace NET {
       (function* () {
         const [serialized_endpoint, serialized_header] = event.id.split(':')
 
-        const endpoint_stream: SERDE.ByteArray = yield* SERDE.deserialize([serialized_endpoint])
+        const endpoint_stream: SERDE.ByteArray = yield* SERDE.deserialize_raw(serialized_endpoint)
 
         const endpoint: Endpoint = yield* Proto.String.deserialize(endpoint_stream)
 
         const listeners = endpoint_map.get(endpoint)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
-          const header_stream: SERDE.ByteArray = yield* SERDE.deserialize([serialized_header])
+          const header_stream: SERDE.ByteArray = yield* SERDE.deserialize_raw(serialized_header)
 
           const header: Header = yield* Header.deserialize(header_stream)
           for (let i = 0; i < listeners.length; i++) {
@@ -655,12 +695,12 @@ export namespace NET {
 
     const endpoint_stream = new SERDE.ByteArray()
     yield* Proto.String.serialize(endpoint, endpoint_stream)
-    const [serialized_endpoint] = yield* SERDE.serialize(endpoint_stream)
+    const serialized_endpoint = yield* SERDE.serialize_raw(endpoint_stream)
 
     const RUN = function* (header: Header, serialized_packet: string) {
       const header_stream = new SERDE.ByteArray()
       yield* Header.serialize(header, header_stream)
-      const [serialized_header] = yield* SERDE.serialize(header_stream)
+      const serialized_header = yield* SERDE.serialize_raw(header_stream)
       world
         .getDimension('overworld')
         .runCommand(`scriptevent ${serialized_endpoint}:${serialized_header} ${serialized_packet}`)
@@ -673,7 +713,7 @@ export namespace NET {
     for (let i = 0; i < serialized_packets.length; i++) {
       const serialized_packet = serialized_packets[i]
 
-      yield* RUN({ guid, index: i, final: i === serialized_packets.length - 1 }, serialized_packet)
+      yield* RUN({ guid, encoding: ENCODING, index: i, final: i === serialized_packets.length - 1 }, serialized_packet)
     }
   }
 
@@ -717,8 +757,8 @@ export namespace IPC {
     from: Proto.String,
     encryption_enabled: Proto.Boolean,
     encryption_public_key: Proto.String,
-    encryption_prime: Proto.VarInt,
-    encryption_modulus: Proto.VarInt
+    encryption_prime: Proto.UVarInt,
+    encryption_modulus: Proto.UVarInt
   })
   const HandshakeAcknowledgeSerializer = Proto.Object({
     from: Proto.String,
