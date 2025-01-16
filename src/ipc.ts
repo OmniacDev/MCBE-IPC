@@ -32,8 +32,16 @@ export namespace SERDE {
     private _length: number
     private _offset: number
 
-    private get _end() {
+    get end() {
       return this._length + this._offset
+    }
+
+    get front() {
+      return this._offset
+    }
+
+    get data_view() {
+      return this._data_view
     }
 
     constructor(size: number = 256) {
@@ -44,8 +52,8 @@ export namespace SERDE {
     }
 
     write(...values: number[]): void {
-      this._ensure_capacity(this._end + values.length)
-      this._buffer.set(values, this._end)
+      this.ensure_capacity(values.length)
+      this._buffer.set(values, this.end)
       this._length += values.length
     }
 
@@ -60,138 +68,21 @@ export namespace SERDE {
       return []
     }
 
-    write_uint8(value: number): void {
-      this._ensure_capacity(this._end + 1)
-      this._data_view.setUint8(this._end, value)
-      this._length += 1
+    shift_front(amount: number = 1): void {
+      const max_amount = amount > this._length ? this._length : amount
+      this._length -= max_amount
+      this._offset += max_amount
     }
 
-    read_uint8(): number | undefined {
-      if (this._length >= 1) {
-        const value = this._data_view.getUint8(this._offset)
-        this._length -= 1
-        this._offset += 1
-        return value
-      }
-      return undefined
+    shift_end(amount: number = 1): void {
+      this.ensure_capacity(amount)
+      this._length += amount
     }
 
-    write_uint16(value: number): void {
-      this._ensure_capacity(this._end + 2)
-      this._data_view.setUint16(this._end, value)
-      this._length += 2
-    }
-
-    read_uint16(): number | undefined {
-      if (this._length >= 2) {
-        const value = this._data_view.getUint16(this._offset)
-        this._length -= 2
-        this._offset += 2
-        return value
-      }
-      return undefined
-    }
-
-    write_uint32(value: number): void {
-      this._ensure_capacity(this._end + 4)
-      this._data_view.setUint32(this._end, value)
-      this._length += 4
-    }
-
-    read_uint32(): number | undefined {
-      if (this._length >= 4) {
-        const value = this._data_view.getUint32(this._offset)
-        this._length -= 4
-        this._offset += 4
-        return value
-      }
-      return undefined
-    }
-
-    write_int8(value: number): void {
-      this._ensure_capacity(this._end + 1)
-      this._data_view.setInt8(this._end, value)
-      this._length += 1
-    }
-
-    read_int8(): number | undefined {
-      if (this._length >= 1) {
-        const value = this._data_view.getInt8(this._offset)
-        this._length -= 1
-        this._offset += 1
-        return value
-      }
-      return undefined
-    }
-
-    write_int16(value: number): void {
-      this._ensure_capacity(this._end + 2)
-      this._data_view.setInt16(this._end, value)
-      this._length += 2
-    }
-
-    read_int16(): number | undefined {
-      if (this._length >= 2) {
-        const value = this._data_view.getInt16(this._offset)
-        this._length -= 2
-        this._offset += 2
-        return value
-      }
-      return undefined
-    }
-
-    write_int32(value: number): void {
-      this._ensure_capacity(this._end + 4)
-      this._data_view.setInt32(this._end, value)
-      this._length += 4
-    }
-
-    read_int32(): number | undefined {
-      if (this._length >= 4) {
-        const value = this._data_view.getInt32(this._offset)
-        this._length -= 4
-        this._offset += 4
-        return value
-      }
-      return undefined
-    }
-
-    write_f32(value: number): void {
-      this._ensure_capacity(this._end + 4)
-      this._data_view.setFloat32(this._end, value)
-      this._length += 4
-    }
-
-    read_f32(): number | undefined {
-      if (this._length >= 4) {
-        const value = this._data_view.getFloat32(this._offset)
-        this._length -= 4
-        this._offset += 4
-        return value
-      }
-      return undefined
-    }
-
-    write_f64(value: number): void {
-      this._ensure_capacity(this._end + 8)
-      this._data_view.setFloat64(this._end, value)
-      this._length += 8
-    }
-
-    read_f64(): number | undefined {
-      if (this._length >= 8) {
-        const value = this._data_view.getFloat64(this._offset)
-        this._length -= 8
-        this._offset += 8
-        return value
-      }
-      return undefined
-    }
-
-    private _ensure_capacity(size: number) {
-      if (size > this._buffer.length) {
-        const larger_buffer = new Uint8Array(size * 2)
-        larger_buffer.set(this._buffer.subarray(this._offset, this._end), 0)
+    ensure_capacity(size: number) {
+      if (this.end + size > this._buffer.length) {
+        const larger_buffer = new Uint8Array((this.end + size) * 2)
+        larger_buffer.set(this._buffer.subarray(this._offset, this.end), 0)
         this._buffer = larger_buffer
         this._offset = 0
         this._data_view = new DataView(this._buffer.buffer)
@@ -208,7 +99,7 @@ export namespace SERDE {
     }
 
     to_uint8array() {
-      return this._buffer.subarray(this._offset, this._end)
+      return this._buffer.subarray(this._offset, this.end)
     }
   }
 
@@ -358,108 +249,78 @@ export class Proto {
   }
   static Int8: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.write_int8(value)
+      stream.ensure_capacity(1)
+      stream.data_view.setInt8(stream.end, value)
+      stream.shift_end(1)
     },
     *deserialize(stream) {
-      return stream.read_int8()!
+      const value = stream.data_view.getInt8(stream.front)
+      stream.shift_front(1)
+      return value
     }
   }
   static Int16: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.write_int16(value)
+      stream.ensure_capacity(2)
+      stream.data_view.setInt16(stream.end, value)
+      stream.shift_end(2)
     },
     *deserialize(stream) {
-      return stream.read_int16()!
+      const value = stream.data_view.getInt16(stream.front)
+      stream.shift_front(2)
+      return value
     }
   }
   static Int32: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.write_int32(value)
+      stream.ensure_capacity(4)
+      stream.data_view.setInt32(stream.end, value)
+      stream.shift_end(4)
     },
     *deserialize(stream) {
-      return stream.read_int32()!
-    }
-  }
-  static VarInt16: NET.Serializable<number> = {
-    *serialize(value, stream) {
-      value = (value << 1) ^ (value >> 31)
-      yield* Proto.UVarInt16.serialize(value, stream)
-    },
-    *deserialize(stream) {
-      const value = yield* Proto.UVarInt16.deserialize(stream)
-      return (value >>> 1) ^ -(value & 1)
-    }
-  }
-  static VarInt32: NET.Serializable<number> = {
-    *serialize(value, stream) {
-      value = (value << 1) ^ (value >> 31)
-      yield* Proto.UVarInt32.serialize(value, stream)
-    },
-    *deserialize(stream) {
-      const value = yield* Proto.UVarInt32.deserialize(stream)
-      return (value >>> 1) ^ -(value & 1)
-    }
-  }
-  static VarInt64: NET.Serializable<number> = {
-    *serialize(value, stream) {
-      value = value >= 0 ? value * 2 : -value * 2 - 1
-      yield* Proto.UVarInt64.serialize(value, stream)
-    },
-    *deserialize(stream) {
-      const value = yield* Proto.UVarInt64.deserialize(stream)
-      return value % 2 === 0 ? value / 2 : -(value + 1) / 2
+      const value = stream.data_view.getInt32(stream.front)
+      stream.shift_front(4)
+      return value
     }
   }
   static UInt8: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.write_uint8(value)
+      stream.ensure_capacity(1)
+      stream.data_view.setUint8(stream.end, value)
+      stream.shift_end(1)
     },
     *deserialize(stream) {
-      return stream.read_uint8()!
+      const value = stream.data_view.getUint8(stream.front)
+      stream.shift_front(1)
+      return value
     }
   }
   static UInt16: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.write_uint16(value)
+      stream.ensure_capacity(2)
+      stream.data_view.setUint16(stream.end, value)
+      stream.shift_end(2)
     },
     *deserialize(stream) {
-      return stream.read_uint16()!
+      const value = stream.data_view.getUint16(stream.front)
+      stream.shift_front(2)
+      return value
     }
   }
   static UInt32: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.write_uint32(value)
+      stream.ensure_capacity(4)
+      stream.data_view.setUint32(stream.end, value)
+      stream.shift_end(4)
     },
     *deserialize(stream) {
-      return stream.read_uint32()!
-    }
-  }
-  static UVarInt16: NET.Serializable<number> = {
-    *serialize(value, stream) {
-      value &= 0xffff
-      while (value >= 0x80) {
-        stream.write((value & 0x7f) | 0x80)
-        value >>= 7
-        yield
-      }
-      stream.write(value)
-    },
-    *deserialize(stream) {
-      let value = 0
-      let shift = 0
-      let byte
-      do {
-        byte = stream.read()[0]!
-        value |= (byte & 0x7f) << shift
-        shift += 7
-        yield
-      } while ((byte & 0x80) !== 0 && shift < 16)
-      return value & 0xffff
+      const value = stream.data_view.getUint32(stream.front)
+      stream.shift_front(4)
+      return value
     }
   }
   static UVarInt32: NET.Serializable<number> = {
     *serialize(value, stream) {
-      value &= 0xffffffff
       while (value >= 0x80) {
         stream.write((value & 0x7f) | 0x80)
         value >>= 7
@@ -469,68 +330,54 @@ export class Proto {
     },
     *deserialize(stream) {
       let value = 0
-      let shift = 0
+      let size = 0
       let byte
       do {
-        byte = stream.read()[0]!
-        value |= (byte & 0x7f) << shift
-        shift += 7
+        byte = stream.read()[0]
+        value |= (byte & 0x7f) << (size * 7)
+        size += 1
         yield
-      } while ((byte & 0x80) !== 0)
-      return value & 0xffffffff
-    }
-  }
-  static UVarInt64: NET.Serializable<number> = {
-    *serialize(value, stream) {
-      while (value >= 128) {
-        stream.write((value % 128) + 128)
-        value = Math.floor(value / 128)
-        yield
-      }
-      stream.write(value)
-    },
-    *deserialize(stream) {
-      let value = 0
-      let shift = 0
-      let byte
-      do {
-        byte = stream.read()[0]!
-        value += (byte % 128) * Math.pow(128, shift)
-        shift += 1
-        yield
-      } while (byte >= 128)
+      } while ((byte & 0x80) !== 0 && size < 10)
       return value
     }
   }
   static Float32: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.write_f32(value)
+      stream.ensure_capacity(4)
+      stream.data_view.setFloat32(stream.end, value)
+      stream.shift_end(4)
     },
     *deserialize(stream) {
-      return stream.read_f32()!
+      const value = stream.data_view.getFloat32(stream.front)
+      stream.shift_front(4)
+      return value
     }
   }
   static Float64: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.write_f64(value)
+      stream.ensure_capacity(8)
+      stream.data_view.setFloat64(stream.end, value)
+      stream.shift_end(8)
     },
     *deserialize(stream) {
-      return stream.read_f64()!
+      const value = stream.data_view.getFloat64(stream.front)
+      stream.shift_front(8)
+      return value
     }
   }
   static String: NET.Serializable<string> = {
     *serialize(value, stream) {
-      yield* Proto.UVarInt64.serialize(value.length, stream)
+      yield* Proto.UVarInt32.serialize(value.length, stream)
       for (let i = 0; i < value.length; i++) {
         const code = value.charCodeAt(i)
-        yield* Proto.UVarInt16.serialize(code, stream)
+        yield* Proto.UVarInt32.serialize(code, stream)
       }
     },
     *deserialize(stream) {
-      const length = yield* Proto.UVarInt64.deserialize(stream)
+      const length = yield* Proto.UVarInt32.deserialize(stream)
       let value = ''
       for (let i = 0; i < length; i++) {
-        const code = yield* Proto.UVarInt16.deserialize(stream)
+        const code = yield* Proto.UVarInt32.deserialize(stream)
         value += String.fromCharCode(code)
       }
       return value
@@ -547,27 +394,20 @@ export class Proto {
   }
   static UInt8Array: NET.Serializable<Uint8Array> = {
     *serialize(value: Uint8Array, stream: SERDE.ByteArray) {
-      yield* Proto.UVarInt64.serialize(value.length, stream)
-      for (const item of value) {
-        stream.write_uint8(item)
-        yield
-      }
+      yield* Proto.UVarInt32.serialize(value.length, stream)
+      stream.write(...value)
     },
     *deserialize(stream: SERDE.ByteArray) {
-      const length = yield* Proto.UVarInt64.deserialize(stream)
-      const result = new Uint8Array(length)
-      for (let i = 0; i < length; i++) {
-        result[i] = stream.read_uint8()!
-      }
-      return result
+      const length = yield* Proto.UVarInt32.deserialize(stream)
+      return new Uint8Array(stream.read(length))
     }
   }
   static Date: NET.Serializable<Date> = {
     *serialize(value: Date, stream: SERDE.ByteArray) {
-      yield* Proto.UVarInt64.serialize(value.getTime(), stream)
+      yield* Proto.Float64.serialize(value.getTime(), stream)
     },
     *deserialize(stream: SERDE.ByteArray) {
-      return new Date(yield* Proto.UVarInt64.deserialize(stream))
+      return new Date(yield* Proto.Float64.deserialize(stream))
     }
   }
   static Object<T extends object>(obj: { [K in keyof T]: NET.Serializable<T[K]> }): NET.Serializable<T> {
@@ -589,14 +429,14 @@ export class Proto {
   static Array<T>(items: NET.Serializable<T>): NET.Serializable<T[]> {
     return {
       *serialize(value, stream) {
-        yield* Proto.UVarInt64.serialize(value.length, stream)
+        yield* Proto.UVarInt32.serialize(value.length, stream)
         for (const item of value) {
           yield* items.serialize(item, stream)
         }
       },
       *deserialize(stream) {
         const result: T[] = []
-        const length = yield* Proto.UVarInt64.deserialize(stream)
+        const length = yield* Proto.UVarInt32.deserialize(stream)
         for (let i = 0; i < length; i++) {
           result[i] = yield* items.deserialize(stream)
         }
@@ -639,14 +479,14 @@ export class Proto {
   static Map<K, V>(key: NET.Serializable<K>, value: NET.Serializable<V>): NET.Serializable<Map<K, V>> {
     return {
       *serialize(map, stream) {
-        yield* Proto.UVarInt64.serialize(map.size, stream)
+        yield* Proto.UVarInt32.serialize(map.size, stream)
         for (const [k, v] of map.entries()) {
           yield* key.serialize(k, stream)
           yield* value.serialize(v, stream)
         }
       },
       *deserialize(stream) {
-        const size = yield* Proto.UVarInt64.deserialize(stream)
+        const size = yield* Proto.UVarInt32.deserialize(stream)
         const result = new Map<K, V>()
         for (let i = 0; i < size; i++) {
           const k = yield* key.deserialize(stream)
@@ -660,13 +500,13 @@ export class Proto {
   static Set<V>(value: NET.Serializable<V>): NET.Serializable<Set<V>> {
     return {
       *serialize(set, stream) {
-        yield* Proto.UVarInt64.serialize(set.size, stream)
+        yield* Proto.UVarInt32.serialize(set.size, stream)
         for (const [_, v] of set.entries()) {
           yield* value.serialize(v, stream)
         }
       },
       *deserialize(stream) {
-        const size = yield* Proto.UVarInt64.deserialize(stream)
+        const size = yield* Proto.UVarInt32.deserialize(stream)
         const result = new Set<V>()
         for (let i = 0; i < size; i++) {
           const v = yield* value.deserialize(stream)
@@ -699,7 +539,7 @@ export namespace NET {
   const Header: Serializable<Header> = Proto.Object<Header>({
     guid: Proto.String,
     encoding: Proto.String,
-    index: Proto.UVarInt64,
+    index: Proto.UVarInt32,
     final: Proto.Boolean
   })
 
@@ -822,8 +662,8 @@ export namespace IPC {
     from: Proto.String,
     encryption_enabled: Proto.Boolean,
     encryption_public_key: Proto.String,
-    encryption_prime: Proto.UVarInt64,
-    encryption_modulus: Proto.UVarInt64
+    encryption_prime: Proto.UVarInt32,
+    encryption_modulus: Proto.UVarInt32
   })
   const HandshakeAcknowledgeSerializer = Proto.Object({
     from: Proto.String,
