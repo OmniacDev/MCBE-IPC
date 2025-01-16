@@ -169,7 +169,7 @@ export namespace SERDE {
   }
 
   export function* deserialize_raw(str: string): Generator<void, ByteArray, void> {
-    if (str.startsWith('(0x')) {
+    if (str.startsWith('(0x') && str.endsWith(')')) {
       const result = []
       const hex_str = str.slice(3, str.length - 1)
       for (let i = 0; i < hex_str.length; i++) {
