@@ -380,6 +380,36 @@ export class Proto {
       return stream.read_int32()!
     }
   }
+  static VarInt16: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      value = (value << 1) ^ (value >> 31)
+      yield* Proto.UVarInt16.serialize(value, stream)
+    },
+    *deserialize(stream) {
+      const value = yield* Proto.UVarInt16.deserialize(stream)
+      return (value >>> 1) ^ -(value & 1)
+    }
+  }
+  static VarInt32: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      value = (value << 1) ^ (value >> 31)
+      yield* Proto.UVarInt32.serialize(value, stream)
+    },
+    *deserialize(stream) {
+      const value = yield* Proto.UVarInt32.deserialize(stream)
+      return (value >>> 1) ^ -(value & 1)
+    }
+  }
+  static VarInt64: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      value = value >= 0 ? value * 2 : -value * 2 - 1
+      yield* Proto.UVarInt64.serialize(value, stream)
+    },
+    *deserialize(stream) {
+      const value = yield* Proto.UVarInt64.deserialize(stream)
+      return value % 2 === 0 ? value / 2 : -(value + 1) / 2
+    }
+  }
   static UInt8: NET.Serializable<number> = {
     *serialize(value, stream) {
       stream.write_uint8(value)
@@ -404,24 +434,32 @@ export class Proto {
       return stream.read_uint32()!
     }
   }
-  static Float32: NET.Serializable<number> = {
+  static UVarInt16: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.write_f32(value)
+      value &= 0xffff
+      while (value >= 0x80) {
+        stream.write((value & 0x7f) | 0x80)
+        value >>= 7
+        yield
+      }
+      stream.write(value)
     },
     *deserialize(stream) {
-      return stream.read_f32()!
-    }
-  }
-  static Float64: NET.Serializable<number> = {
-    *serialize(value, stream) {
-      stream.write_f64(value)
-    },
-    *deserialize(stream) {
-      return stream.read_f64()!
+      let value = 0
+      let shift = 0
+      let byte
+      do {
+        byte = stream.read()[0]!
+        value |= (byte & 0x7f) << shift
+        shift += 7
+        yield
+      } while ((byte & 0x80) !== 0 && shift < 16)
+      return value & 0xffff
     }
   }
   static UVarInt32: NET.Serializable<number> = {
     *serialize(value, stream) {
+      value &= 0xffffffff
       while (value >= 0x80) {
         stream.write((value & 0x7f) | 0x80)
         value >>= 7
@@ -439,17 +477,7 @@ export class Proto {
         shift += 7
         yield
       } while ((byte & 0x80) !== 0)
-      return value
-    }
-  }
-  static VarInt32: NET.Serializable<number> = {
-    *serialize(value, stream) {
-      value = (value << 1) ^ (value >> 31)
-      yield* Proto.UVarInt32.serialize(value, stream)
-    },
-    *deserialize(stream) {
-      const value = yield* Proto.UVarInt32.deserialize(stream)
-      return (value >>> 1) ^ -(value & 1)
+      return value & 0xffffffff
     }
   }
   static UVarInt64: NET.Serializable<number> = {
@@ -474,14 +502,20 @@ export class Proto {
       return value
     }
   }
-  static VarInt64: NET.Serializable<number> = {
+  static Float32: NET.Serializable<number> = {
     *serialize(value, stream) {
-      value = value >= 0 ? value * 2 : -value * 2 - 1
-      yield* Proto.UVarInt64.serialize(value, stream)
+      stream.write_f32(value)
     },
     *deserialize(stream) {
-      const value = yield* Proto.UVarInt64.deserialize(stream)
-      return value % 2 === 0 ? value / 2 : -(value + 1) / 2
+      return stream.read_f32()!
+    }
+  }
+  static Float64: NET.Serializable<number> = {
+    *serialize(value, stream) {
+      stream.write_f64(value)
+    },
+    *deserialize(stream) {
+      return stream.read_f64()!
     }
   }
   static String: NET.Serializable<string> = {
@@ -489,14 +523,14 @@ export class Proto {
       yield* Proto.UVarInt64.serialize(value.length, stream)
       for (let i = 0; i < value.length; i++) {
         const code = value.charCodeAt(i)
-        yield* Proto.UVarInt32.serialize(code, stream)
+        yield* Proto.UVarInt16.serialize(code, stream)
       }
     },
     *deserialize(stream) {
       const length = yield* Proto.UVarInt64.deserialize(stream)
       let value = ''
       for (let i = 0; i < length; i++) {
-        const code = yield* Proto.UVarInt32.deserialize(stream)
+        const code = yield* Proto.UVarInt16.deserialize(stream)
         value += String.fromCharCode(code)
       }
       return value
