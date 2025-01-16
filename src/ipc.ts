@@ -536,6 +536,7 @@ export namespace NET {
     final: boolean
   }
 
+  const Endpoint: Serializable<Endpoint> = Proto.String
   const Header: Serializable<Header> = Proto.Object<Header>({
     guid: Proto.String,
     encoding: Proto.String,
@@ -552,7 +553,7 @@ export namespace NET {
 
         const endpoint_stream: SERDE.ByteArray = yield* SERDE.deserialize_raw(serialized_endpoint)
 
-        const endpoint: Endpoint = yield* Proto.String.deserialize(endpoint_stream)
+        const endpoint: Endpoint = yield* Endpoint.deserialize(endpoint_stream)
 
         const listeners = endpoint_map.get(endpoint)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
@@ -599,7 +600,7 @@ export namespace NET {
     const guid = generate_id()
 
     const endpoint_stream = new SERDE.ByteArray()
-    yield* Proto.String.serialize(endpoint, endpoint_stream)
+    yield* Endpoint.serialize(endpoint, endpoint_stream)
     const serialized_endpoint = yield* SERDE.serialize_raw(endpoint_stream)
 
     const RUN = function* (header: Header, serialized_packet: string) {
