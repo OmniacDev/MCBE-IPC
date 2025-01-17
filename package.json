@@ -15,17 +15,18 @@
   "type": "module",
   "main": "dist/ipc.js",
   "types": "dist/ipc.d.ts",
-  "files": ["dist/ipc.js", "dist/ipc.d.ts"],
+  "files": [
+    "dist/ipc.js",
+    "dist/ipc.d.ts"
+  ],
   "scripts": {
-    "build": "tsc && uglifyjs dist/ipc.js --mangle --compress --output dist/ipc.min.js",
+    "build": "tsc",
     "format": "prettier --write src",
-    "build-clean": "tsc",
-    "prepublishOnly": "npm run build-clean"
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "prettier": "^3.3.3",
-    "typescript": "^5.5.4",
-    "uglify-js": "^3.19.3"
+    "typescript": "^5.5.4"
   },
   "dependencies": {
     "@minecraft/server": "^1.13.0"

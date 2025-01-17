@@ -406,7 +406,7 @@ export namespace NET {
   const FRAG_MAX: number = 2048
   const ENCODING: string = 'mcbe-ipc:v3'
   const ENDPOINTS = new Map<Endpoint, Array<Listener>>()
-  
+
   type Listener = (header: Header, serialized_packet: string) => Generator<void, void, void>
   type Endpoint = string
   type Header = {
@@ -415,7 +415,7 @@ export namespace NET {
     index: number
     final: boolean
   }
-  
+
   const Endpoint: Proto.Serializable<Endpoint> = Proto.String
   const Header: Proto.Serializable<Header> = Proto.Object<Header>({
     guid: Proto.String,
@@ -606,7 +606,11 @@ export namespace IPC {
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<T>(channel: string, deserializer: Proto.Serializable<T>, listener: (value: T) => void): () => void {
+  export function on<T>(
+    channel: string,
+    deserializer: Proto.Serializable<T>,
+    listener: (value: T) => void
+  ): () => void {
     return NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
       listener(value)
     })
