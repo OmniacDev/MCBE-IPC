@@ -144,7 +144,7 @@ export namespace SERDE {
     return ByteArray.from_uint8array(new Uint8Array(result))
   }
 
-  export function* serialize_raw(byte_array: ByteArray): Generator<void, string, void> {
+  export function* standard_serialize(byte_array: ByteArray): Generator<void, string, void> {
     const uint8array = byte_array.to_uint8array()
 
     let str = '(0x'
@@ -157,7 +157,7 @@ export namespace SERDE {
     return str
   }
 
-  export function* deserialize_raw(str: string): Generator<void, ByteArray, void> {
+  export function* standard_deserialize(str: string): Generator<void, ByteArray, void> {
     if (str.startsWith('(0x') && str.endsWith(')')) {
       const result = []
       const hex_str = str.slice(3, str.length - 1)
@@ -541,13 +541,13 @@ export namespace NET {
       (function* () {
         const [serialized_endpoint, serialized_header] = event.id.split(':')
 
-        const endpoint_stream: SERDE.ByteArray = yield* SERDE.deserialize_raw(serialized_endpoint)
+        const endpoint_stream: SERDE.ByteArray = yield* SERDE.standard_deserialize(serialized_endpoint)
 
         const endpoint: Endpoint = yield* Endpoint.deserialize(endpoint_stream)
 
         const listeners = endpoint_map.get(endpoint)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
-          const header_stream: SERDE.ByteArray = yield* SERDE.deserialize_raw(serialized_header)
+          const header_stream: SERDE.ByteArray = yield* SERDE.standard_deserialize(serialized_header)
 
           const header: Header = yield* Header.deserialize(header_stream)
           for (let i = 0; i < listeners.length; i++) {
@@ -591,12 +591,12 @@ export namespace NET {
 
     const endpoint_stream = new SERDE.ByteArray()
     yield* Endpoint.serialize(endpoint, endpoint_stream)
-    const serialized_endpoint = yield* SERDE.serialize_raw(endpoint_stream)
+    const serialized_endpoint = yield* SERDE.standard_serialize(endpoint_stream)
 
     const RUN = function* (header: Header, serialized_packet: string) {
       const header_stream = new SERDE.ByteArray()
       yield* Header.serialize(header, header_stream)
-      const serialized_header = yield* SERDE.serialize_raw(header_stream)
+      const serialized_header = yield* SERDE.standard_serialize(header_stream)
       world
         .getDimension('overworld')
         .runCommand(`scriptevent ${serialized_endpoint}:${serialized_header} ${serialized_packet}`)
