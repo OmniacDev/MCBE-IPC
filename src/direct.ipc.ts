@@ -60,7 +60,7 @@ namespace CRYPTO {
   }
 }
 
-export namespace IPC {
+export namespace DirectIPC {
   const ConnectionSerializer = Proto.Object({
     from: Proto.String,
     bytes: Proto.UInt8Array
@@ -420,3 +420,5 @@ export namespace IPC {
     }
   }
 }
+
+export default DirectIPC
