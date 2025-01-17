@@ -25,73 +25,92 @@
 
 import { ScriptEventSource, system, world } from '@minecraft/server'
 
-export class ByteQueue {
-  private _buffer: Uint8Array
-  private _data_view: DataView
-  private _length: number
-  private _offset: number
-
-  get end() {
-    return this._length + this._offset
+export namespace PROTO {
+  export type Endpoint = string
+  export type Header = {
+    guid: string
+    encoding: string
+    index: number
+    final: boolean
   }
-
-  get front() {
-    return this._offset
+  export const Endpoint: PROTO.Serializable<Endpoint> = PROTO.String
+  export const Header: PROTO.Serializable<Header> = PROTO.Object<Header>({
+    guid: PROTO.String,
+    encoding: PROTO.String,
+    index: PROTO.UVarInt32,
+    final: PROTO.Boolean
+  })
+  export interface Serializable<T> {
+    serialize(value: T, stream: ByteQueue): Generator<void, void, void>
+    deserialize(stream: ByteQueue): Generator<void, T, void>
   }
+  export class ByteQueue {
+    private _buffer: Uint8Array
+    private _data_view: DataView
+    private _length: number
+    private _offset: number
 
-  get data_view() {
-    return this._data_view
-  }
-
-  constructor(size: number = 256) {
-    this._buffer = new Uint8Array(size)
-    this._data_view = new DataView(this._buffer.buffer)
-    this._length = 0
-    this._offset = 0
-  }
-
-  write(...values: number[]): void {
-    this.ensure_capacity(values.length)
-    this._buffer.set(values, this.end)
-    this._length += values.length
-  }
-
-  read(amount: number = 1): number[] {
-    if (this._length > 0) {
-      const max_amount = amount > this._length ? this._length : amount
-      const values = this._buffer.subarray(this._offset, this._offset + max_amount)
-      this._length -= max_amount
-      this._offset += max_amount
-      return Array.from(values)
+    get end() {
+      return this._length + this._offset
     }
-    return []
-  }
 
-  ensure_capacity(size: number) {
-    if (this.end + size > this._buffer.length) {
-      const larger_buffer = new Uint8Array((this.end + size) * 2)
-      larger_buffer.set(this._buffer.subarray(this._offset, this.end), 0)
-      this._buffer = larger_buffer
-      this._offset = 0
+    get front() {
+      return this._offset
+    }
+
+    get data_view() {
+      return this._data_view
+    }
+
+    constructor(size: number = 256) {
+      this._buffer = new Uint8Array(size)
       this._data_view = new DataView(this._buffer.buffer)
+      this._length = 0
+      this._offset = 0
+    }
+
+    write(...values: number[]): void {
+      this.ensure_capacity(values.length)
+      this._buffer.set(values, this.end)
+      this._length += values.length
+    }
+
+    read(amount: number = 1): number[] {
+      if (this._length > 0) {
+        const max_amount = amount > this._length ? this._length : amount
+        const values = this._buffer.subarray(this._offset, this._offset + max_amount)
+        this._length -= max_amount
+        this._offset += max_amount
+        return globalThis.Array.from(values)
+      }
+      return []
+    }
+
+    ensure_capacity(size: number) {
+      if (this.end + size > this._buffer.length) {
+        const larger_buffer = new Uint8Array((this.end + size) * 2)
+        larger_buffer.set(this._buffer.subarray(this._offset, this.end), 0)
+        this._buffer = larger_buffer
+        this._offset = 0
+        this._data_view = new DataView(this._buffer.buffer)
+      }
+    }
+
+    static from_uint8array(array: Uint8Array) {
+      const byte_queue = new ByteQueue()
+      byte_queue._buffer = array
+      byte_queue._length = array.length
+      byte_queue._offset = 0
+      byte_queue._data_view = new DataView(array.buffer)
+      return byte_queue
+    }
+
+    to_uint8array() {
+      return this._buffer.subarray(this._offset, this.end)
     }
   }
-
-  static from_uint8array(array: Uint8Array) {
-    const byte_queue = new ByteQueue()
-    byte_queue._buffer = array
-    byte_queue._length = array.length
-    byte_queue._offset = 0
-    byte_queue._data_view = new DataView(array.buffer)
-    return byte_queue
-  }
-
-  to_uint8array() {
-    return this._buffer.subarray(this._offset, this.end)
-  }
-
-  *standard_serialize(): Generator<void, string, void> {
-    const uint8array = this.to_uint8array()
+  export function* standard_serialize(byte_queue: ByteQueue): Generator<void, string, void> {
+    const uint8array = byte_queue.to_uint8array()
 
     let str = '(0x'
     for (let i = 0; i < uint8array.length; i++) {
@@ -102,8 +121,7 @@ export class ByteQueue {
     str += ')'
     return str
   }
-
-  static *standard_deserialize(str: string): Generator<void, ByteQueue, void> {
+  export function* standard_deserialize(str: string): Generator<void, ByteQueue, void> {
     if (str.startsWith('(0x') && str.endsWith(')')) {
       const result = []
       const hex_str = str.slice(3, str.length - 1)
@@ -116,24 +134,14 @@ export class ByteQueue {
     }
     return new ByteQueue()
   }
-}
-
-export namespace Proto {
-  export interface Serializable<T> {
-    serialize(value: T, stream: ByteQueue): Generator<void, void, void>
-    deserialize(stream: ByteQueue): Generator<void, T, void>
-  }
-}
-
-export class Proto {
-  static Void: Proto.Serializable<void> = {
+  export const Void: PROTO.Serializable<void> = {
     *serialize() {},
     *deserialize() {}
   }
-  static Int8: Proto.Serializable<number> = {
+  export const Int8: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 1
-      stream.write(...Array(length).fill(0))
+      stream.write(...globalThis.Array(length).fill(0))
       stream.data_view.setInt8(stream.end - length, value)
     },
     *deserialize(stream) {
@@ -142,10 +150,10 @@ export class Proto {
       return value
     }
   }
-  static Int16: Proto.Serializable<number> = {
+  export const Int16: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 2
-      stream.write(...Array(length).fill(0))
+      stream.write(...globalThis.Array(length).fill(0))
       stream.data_view.setInt16(stream.end - length, value)
     },
     *deserialize(stream) {
@@ -154,10 +162,10 @@ export class Proto {
       return value
     }
   }
-  static Int32: Proto.Serializable<number> = {
+  export const Int32: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 4
-      stream.write(...Array(length).fill(0))
+      stream.write(...globalThis.Array(length).fill(0))
       stream.data_view.setInt32(stream.end - length, value)
     },
     *deserialize(stream) {
@@ -166,10 +174,10 @@ export class Proto {
       return value
     }
   }
-  static UInt8: Proto.Serializable<number> = {
+  export const UInt8: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 1
-      stream.write(...Array(length).fill(0))
+      stream.write(...globalThis.Array(length).fill(0))
       stream.data_view.setUint8(stream.end - length, value)
     },
     *deserialize(stream) {
@@ -178,10 +186,10 @@ export class Proto {
       return value
     }
   }
-  static UInt16: Proto.Serializable<number> = {
+  export const UInt16: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 2
-      stream.write(...Array(length).fill(0))
+      stream.write(...globalThis.Array(length).fill(0))
       stream.data_view.setUint16(stream.end - length, value)
     },
     *deserialize(stream) {
@@ -190,10 +198,10 @@ export class Proto {
       return value
     }
   }
-  static UInt32: Proto.Serializable<number> = {
+  export const UInt32: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 4
-      stream.write(...Array(length).fill(0))
+      stream.write(...globalThis.Array(length).fill(0))
       stream.data_view.setUint32(stream.end - length, value)
     },
     *deserialize(stream) {
@@ -202,7 +210,7 @@ export class Proto {
       return value
     }
   }
-  static UVarInt32: Proto.Serializable<number> = {
+  export const UVarInt32: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       while (value >= 0x80) {
         stream.write((value & 0x7f) | 0x80)
@@ -224,10 +232,10 @@ export class Proto {
       return value
     }
   }
-  static Float32: Proto.Serializable<number> = {
+  export const Float32: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 4
-      stream.write(...Array(length).fill(0))
+      stream.write(...globalThis.Array(length).fill(0))
       stream.data_view.setFloat32(stream.end - length, value)
     },
     *deserialize(stream) {
@@ -236,10 +244,10 @@ export class Proto {
       return value
     }
   }
-  static Float64: Proto.Serializable<number> = {
+  export const Float64: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 8
-      stream.write(...Array(length).fill(0))
+      stream.write(...globalThis.Array(length).fill(0))
       stream.data_view.setFloat64(stream.end - length, value)
     },
     *deserialize(stream) {
@@ -248,25 +256,25 @@ export class Proto {
       return value
     }
   }
-  static String: Proto.Serializable<string> = {
+  export const String: PROTO.Serializable<string> = {
     *serialize(value, stream) {
-      yield* Proto.UVarInt32.serialize(value.length, stream)
+      yield* PROTO.UVarInt32.serialize(value.length, stream)
       for (let i = 0; i < value.length; i++) {
         const code = value.charCodeAt(i)
-        yield* Proto.UVarInt32.serialize(code, stream)
+        yield* PROTO.UVarInt32.serialize(code, stream)
       }
     },
     *deserialize(stream) {
-      const length = yield* Proto.UVarInt32.deserialize(stream)
+      const length = yield* PROTO.UVarInt32.deserialize(stream)
       let value = ''
       for (let i = 0; i < length; i++) {
-        const code = yield* Proto.UVarInt32.deserialize(stream)
-        value += String.fromCharCode(code)
+        const code = yield* PROTO.UVarInt32.deserialize(stream)
+        value += globalThis.String.fromCharCode(code)
       }
       return value
     }
   }
-  static Boolean: Proto.Serializable<boolean> = {
+  export const Boolean: PROTO.Serializable<boolean> = {
     *serialize(value, stream) {
       stream.write(value ? 1 : 0)
     },
@@ -275,25 +283,25 @@ export class Proto {
       return value === 1
     }
   }
-  static UInt8Array: Proto.Serializable<Uint8Array> = {
+  export const UInt8Array: PROTO.Serializable<Uint8Array> = {
     *serialize(value: Uint8Array, stream: ByteQueue) {
-      yield* Proto.UVarInt32.serialize(value.length, stream)
+      yield* PROTO.UVarInt32.serialize(value.length, stream)
       stream.write(...value)
     },
     *deserialize(stream: ByteQueue) {
-      const length = yield* Proto.UVarInt32.deserialize(stream)
+      const length = yield* PROTO.UVarInt32.deserialize(stream)
       return new Uint8Array(stream.read(length))
     }
   }
-  static Date: Proto.Serializable<Date> = {
+  export const Date: PROTO.Serializable<Date> = {
     *serialize(value: Date, stream: ByteQueue) {
-      yield* Proto.Float64.serialize(value.getTime(), stream)
+      yield* PROTO.Float64.serialize(value.getTime(), stream)
     },
     *deserialize(stream: ByteQueue) {
-      return new Date(yield* Proto.Float64.deserialize(stream))
+      return new globalThis.Date(yield* PROTO.Float64.deserialize(stream))
     }
   }
-  static Object<T extends object>(obj: { [K in keyof T]: Proto.Serializable<T[K]> }): Proto.Serializable<T> {
+  export function Object<T extends object>(obj: { [K in keyof T]: PROTO.Serializable<T[K]> }): PROTO.Serializable<T> {
     return {
       *serialize(value, stream) {
         for (const key in obj) {
@@ -309,17 +317,17 @@ export class Proto {
       }
     }
   }
-  static Array<T>(value: Proto.Serializable<T>): Proto.Serializable<T[]> {
+  export function Array<T>(value: PROTO.Serializable<T>): PROTO.Serializable<T[]> {
     return {
       *serialize(array, stream) {
-        yield* Proto.UVarInt32.serialize(array.length, stream)
+        yield* PROTO.UVarInt32.serialize(array.length, stream)
         for (const item of array) {
           yield* value.serialize(item, stream)
         }
       },
       *deserialize(stream) {
         const result: T[] = []
-        const length = yield* Proto.UVarInt32.deserialize(stream)
+        const length = yield* PROTO.UVarInt32.deserialize(stream)
         for (let i = 0; i < length; i++) {
           result[i] = yield* value.deserialize(stream)
         }
@@ -327,7 +335,9 @@ export class Proto {
       }
     }
   }
-  static Tuple<T extends any[]>(...values: { [K in keyof T]: Proto.Serializable<T[K]> }): Proto.Serializable<T> {
+  export function Tuple<T extends any[]>(
+    ...values: { [K in keyof T]: PROTO.Serializable<T[K]> }
+  ): PROTO.Serializable<T> {
     return {
       *serialize(tuple, stream) {
         for (let i = 0; i < values.length; i++) {
@@ -343,16 +353,16 @@ export class Proto {
       }
     }
   }
-  static Optional<T>(value: Proto.Serializable<T>): Proto.Serializable<T | undefined> {
+  export function Optional<T>(value: PROTO.Serializable<T>): PROTO.Serializable<T | undefined> {
     return {
       *serialize(optional, stream) {
-        yield* Proto.Boolean.serialize(value !== undefined, stream)
+        yield* PROTO.Boolean.serialize(value !== undefined, stream)
         if (optional !== undefined) {
           yield* value.serialize(optional, stream)
         }
       },
       *deserialize(stream) {
-        const defined = yield* Proto.Boolean.deserialize(stream)
+        const defined = yield* PROTO.Boolean.deserialize(stream)
         if (defined) {
           return yield* value.deserialize(stream)
         }
@@ -360,18 +370,18 @@ export class Proto {
       }
     }
   }
-  static Map<K, V>(key: Proto.Serializable<K>, value: Proto.Serializable<V>): Proto.Serializable<Map<K, V>> {
+  export function Map<K, V>(key: PROTO.Serializable<K>, value: PROTO.Serializable<V>): PROTO.Serializable<Map<K, V>> {
     return {
       *serialize(map, stream) {
-        yield* Proto.UVarInt32.serialize(map.size, stream)
+        yield* PROTO.UVarInt32.serialize(map.size, stream)
         for (const [k, v] of map.entries()) {
           yield* key.serialize(k, stream)
           yield* value.serialize(v, stream)
         }
       },
       *deserialize(stream) {
-        const size = yield* Proto.UVarInt32.deserialize(stream)
-        const result = new Map<K, V>()
+        const size = yield* PROTO.UVarInt32.deserialize(stream)
+        const result = new globalThis.Map<K, V>()
         for (let i = 0; i < size; i++) {
           const k = yield* key.deserialize(stream)
           const v = yield* value.deserialize(stream)
@@ -381,17 +391,17 @@ export class Proto {
       }
     }
   }
-  static Set<V>(value: Proto.Serializable<V>): Proto.Serializable<Set<V>> {
+  export function Set<V>(value: PROTO.Serializable<V>): PROTO.Serializable<Set<V>> {
     return {
       *serialize(set, stream) {
-        yield* Proto.UVarInt32.serialize(set.size, stream)
+        yield* PROTO.UVarInt32.serialize(set.size, stream)
         for (const [_, v] of set.entries()) {
           yield* value.serialize(v, stream)
         }
       },
       *deserialize(stream) {
-        const size = yield* Proto.UVarInt32.deserialize(stream)
-        const result = new Set<V>()
+        const size = yield* PROTO.UVarInt32.deserialize(stream)
+        const result = new globalThis.Set<V>()
         for (let i = 0; i < size; i++) {
           const v = yield* value.deserialize(stream)
           result.add(v)
@@ -403,28 +413,16 @@ export class Proto {
 }
 
 export namespace NET {
+  type Listener = (header: PROTO.Header, serialized_packet: string) => Generator<void, void, void>
+
   const FRAG_MAX: number = 2048
   const ENCODING: string = 'mcbe-ipc:v3'
-  const ENDPOINTS = new Map<Endpoint, Array<Listener>>()
+  const ENDPOINTS = new Map<PROTO.Endpoint, Array<Listener>>()
 
-  type Listener = (header: Header, serialized_packet: string) => Generator<void, void, void>
-  type Endpoint = string
-  type Header = {
-    guid: string
-    encoding: string
-    index: number
-    final: boolean
-  }
-
-  const Endpoint: Proto.Serializable<Endpoint> = Proto.String
-  const Header: Proto.Serializable<Header> = Proto.Object<Header>({
-    guid: Proto.String,
-    encoding: Proto.String,
-    index: Proto.UVarInt32,
-    final: Proto.Boolean
-  })
-
-  export function* serialize(byte_queue: ByteQueue, max_size: number = Infinity): Generator<void, string[], void> {
+  export function* serialize(
+    byte_queue: PROTO.ByteQueue,
+    max_size: number = Infinity
+  ): Generator<void, string[], void> {
     const uint8array = byte_queue.to_uint8array()
     const result: string[] = []
 
@@ -453,7 +451,7 @@ export namespace NET {
 
     return result
   }
-  export function* deserialize(strings: string[]): Generator<void, ByteQueue, void> {
+  export function* deserialize(strings: string[]): Generator<void, PROTO.ByteQueue, void> {
     const result: number[] = []
     for (let i = 0; i < strings.length; i++) {
       const str = strings[i]
@@ -472,7 +470,7 @@ export namespace NET {
       }
       yield
     }
-    return ByteQueue.from_uint8array(new Uint8Array(result))
+    return PROTO.ByteQueue.from_uint8array(new Uint8Array(result))
   }
 
   system.afterEvents.scriptEventReceive.subscribe(event => {
@@ -480,15 +478,15 @@ export namespace NET {
       (function* () {
         const [serialized_endpoint, serialized_header] = event.id.split(':')
 
-        const endpoint_stream: ByteQueue = yield* ByteQueue.standard_deserialize(serialized_endpoint)
+        const endpoint_stream: PROTO.ByteQueue = yield* PROTO.standard_deserialize(serialized_endpoint)
 
-        const endpoint: Endpoint = yield* Endpoint.deserialize(endpoint_stream)
+        const endpoint: PROTO.Endpoint = yield* PROTO.Endpoint.deserialize(endpoint_stream)
 
         const listeners = ENDPOINTS.get(endpoint)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
-          const header_stream: ByteQueue = yield* ByteQueue.standard_deserialize(serialized_header)
+          const header_stream: PROTO.ByteQueue = yield* PROTO.standard_deserialize(serialized_header)
 
-          const header: Header = yield* Header.deserialize(header_stream)
+          const header: PROTO.Header = yield* PROTO.Header.deserialize(header_stream)
           for (let i = 0; i < listeners.length; i++) {
             yield* listeners[i](header, event.message)
           }
@@ -497,7 +495,7 @@ export namespace NET {
     )
   })
 
-  function create_listener(endpoint: Endpoint, listener: Listener) {
+  function create_listener(endpoint: PROTO.Endpoint, listener: Listener) {
     let listeners = ENDPOINTS.get(endpoint)
     if (!listeners) {
       listeners = new Array<Listener>()
@@ -514,7 +512,6 @@ export namespace NET {
       }
     }
   }
-
   function generate_id(): string {
     const r = ((Math.random() * 0x100000000) & Date.now()) >>> 0
     return (
@@ -525,23 +522,23 @@ export namespace NET {
     ).toUpperCase()
   }
 
-  export function* emit<T>(endpoint: string, serializer: Proto.Serializable<T>, value: T): Generator<void, void, void> {
+  export function* emit<T>(endpoint: string, serializer: PROTO.Serializable<T>, value: T): Generator<void, void, void> {
     const guid = generate_id()
 
-    const endpoint_stream = new ByteQueue()
-    yield* Endpoint.serialize(endpoint, endpoint_stream)
-    const serialized_endpoint = yield* endpoint_stream.standard_serialize()
+    const endpoint_stream = new PROTO.ByteQueue()
+    yield* PROTO.Endpoint.serialize(endpoint, endpoint_stream)
+    const serialized_endpoint = yield* PROTO.standard_serialize(endpoint_stream)
 
-    const RUN = function* (header: Header, serialized_packet: string) {
-      const header_stream = new ByteQueue()
-      yield* Header.serialize(header, header_stream)
-      const serialized_header = yield* header_stream.standard_serialize()
+    const RUN = function* (header: PROTO.Header, serialized_packet: string) {
+      const header_stream = new PROTO.ByteQueue()
+      yield* PROTO.Header.serialize(header, header_stream)
+      const serialized_header = yield* PROTO.standard_serialize(header_stream)
       world
         .getDimension('overworld')
         .runCommand(`scriptevent ${serialized_endpoint}:${serialized_header} ${serialized_packet}`)
     }
 
-    const packet_stream = new ByteQueue()
+    const packet_stream = new PROTO.ByteQueue()
     yield* serializer.serialize(value, packet_stream)
 
     const serialized_packets = yield* serialize(packet_stream, FRAG_MAX)
@@ -551,14 +548,16 @@ export namespace NET {
       yield* RUN({ guid, encoding: ENCODING, index: i, final: i === serialized_packets.length - 1 }, serialized_packet)
     }
   }
-
   export function listen<T>(
     endpoint: string,
-    serializer: Proto.Serializable<T>,
+    serializer: PROTO.Serializable<T>,
     callback: (value: T) => Generator<void, void, void>
   ) {
     const buffer = new Map<string, { size: number; serialized_packets: string[]; data_size: number }>()
-    const listener: Listener = function* (payload: Header, serialized_packet: string): Generator<void, void, void> {
+    const listener: Listener = function* (
+      payload: PROTO.Header,
+      serialized_packet: string
+    ): Generator<void, void, void> {
       let fragment = buffer.get(payload.guid)
       if (!fragment) {
         fragment = { size: -1, serialized_packets: [], data_size: 0 }
@@ -585,16 +584,16 @@ export namespace NET {
 
 export namespace IPC {
   /** Sends a message with `args` to `channel` */
-  export function send<T>(channel: string, serializer: Proto.Serializable<T>, value: T): void {
+  export function send<T>(channel: string, serializer: PROTO.Serializable<T>, value: T): void {
     system.runJob(NET.emit(`ipc:${channel}:send`, serializer, value))
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
   export function invoke<T, R>(
     channel: string,
-    serializer: Proto.Serializable<T>,
+    serializer: PROTO.Serializable<T>,
     value: T,
-    deserializer: Proto.Serializable<R>
+    deserializer: PROTO.Serializable<R>
   ): Promise<R> {
     system.runJob(NET.emit(`ipc:${channel}:invoke`, serializer, value))
     return new Promise(resolve => {
@@ -608,7 +607,7 @@ export namespace IPC {
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
   export function on<T>(
     channel: string,
-    deserializer: Proto.Serializable<T>,
+    deserializer: PROTO.Serializable<T>,
     listener: (value: T) => void
   ): () => void {
     return NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
@@ -617,7 +616,7 @@ export namespace IPC {
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<T>(channel: string, deserializer: Proto.Serializable<T>, listener: (value: T) => void) {
+  export function once<T>(channel: string, deserializer: PROTO.Serializable<T>, listener: (value: T) => void) {
     const terminate = NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
       listener(value)
       terminate()
@@ -628,8 +627,8 @@ export namespace IPC {
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
   export function handle<T, R>(
     channel: string,
-    deserializer: Proto.Serializable<T>,
-    serializer: Proto.Serializable<R>,
+    deserializer: PROTO.Serializable<T>,
+    serializer: PROTO.Serializable<R>,
     listener: (value: T) => R
   ): () => void {
     return NET.listen(`ipc:${channel}:invoke`, deserializer, function* (value) {

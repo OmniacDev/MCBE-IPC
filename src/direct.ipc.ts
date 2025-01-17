@@ -1,5 +1,5 @@
 import { system } from '@minecraft/server'
-import { NET, Proto, ByteQueue } from './ipc'
+import { NET, PROTO } from './ipc'
 
 namespace CRYPTO {
   export const PRIME: number = 19893121
@@ -61,21 +61,21 @@ namespace CRYPTO {
 }
 
 export namespace DirectIPC {
-  const ConnectionSerializer = Proto.Object({
-    from: Proto.String,
-    bytes: Proto.UInt8Array
+  const ConnectionSerializer = PROTO.Object({
+    from: PROTO.String,
+    bytes: PROTO.UInt8Array
   })
-  const HandshakeSynchronizeSerializer = Proto.Object({
-    from: Proto.String,
-    encryption_enabled: Proto.Boolean,
-    encryption_public_key: Proto.String,
-    encryption_prime: Proto.UVarInt32,
-    encryption_modulus: Proto.UVarInt32
+  const HandshakeSynchronizeSerializer = PROTO.Object({
+    from: PROTO.String,
+    encryption_enabled: PROTO.Boolean,
+    encryption_public_key: PROTO.String,
+    encryption_prime: PROTO.UVarInt32,
+    encryption_modulus: PROTO.UVarInt32
   })
-  const HandshakeAcknowledgeSerializer = Proto.Object({
-    from: Proto.String,
-    encryption_enabled: Proto.Boolean,
-    encryption_public_key: Proto.String
+  const HandshakeAcknowledgeSerializer = PROTO.Object({
+    from: PROTO.String,
+    encryption_enabled: PROTO.Boolean,
+    encryption_public_key: PROTO.String
   })
 
   export class Connection {
@@ -111,15 +111,15 @@ export namespace DirectIPC {
       $._terminators.forEach(terminate => terminate())
       $._terminators.length = 0
       if (notify) {
-        system.runJob(NET.emit(`ipc:${$._to}:terminate`, Proto.String, $._from))
+        system.runJob(NET.emit(`ipc:${$._to}:terminate`, PROTO.String, $._from))
       }
     }
 
-    send<T>(channel: string, serializer: Proto.Serializable<T>, value: T): void {
+    send<T>(channel: string, serializer: PROTO.Serializable<T>, value: T): void {
       const $ = this
       system.runJob(
         (function* () {
-          const stream = new ByteQueue()
+          const stream = new PROTO.ByteQueue()
           yield* serializer.serialize(value, stream)
           const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array())
           yield* NET.emit(`ipc:${$._to}:${channel}:send`, ConnectionSerializer, {
@@ -132,14 +132,14 @@ export namespace DirectIPC {
 
     invoke<T, R>(
       channel: string,
-      serializer: Proto.Serializable<T>,
+      serializer: PROTO.Serializable<T>,
       value: T,
-      deserializer: Proto.Serializable<R>
+      deserializer: PROTO.Serializable<R>
     ): Promise<R> {
       const $ = this
       system.runJob(
         (function* () {
-          const stream = new ByteQueue()
+          const stream = new PROTO.ByteQueue()
           yield* serializer.serialize(value, stream)
           const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array())
           yield* NET.emit(`ipc:${$._to}:${channel}:invoke`, ConnectionSerializer, {
@@ -153,7 +153,7 @@ export namespace DirectIPC {
         const terminate = NET.listen(`ipc:${$._from}:${channel}:handle`, ConnectionSerializer, function* (data) {
           if (data.from === $._to) {
             const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
-            const stream = ByteQueue.from_uint8array(bytes)
+            const stream = PROTO.ByteQueue.from_uint8array(bytes)
             const value = yield* deserializer.deserialize(stream)
             resolve(value)
             terminate()
@@ -162,12 +162,12 @@ export namespace DirectIPC {
       })
     }
 
-    on<T>(channel: string, deserializer: Proto.Serializable<T>, listener: (value: T) => void) {
+    on<T>(channel: string, deserializer: PROTO.Serializable<T>, listener: (value: T) => void) {
       const $ = this
       const terminate = NET.listen(`ipc:${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
           const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
-          const stream = ByteQueue.from_uint8array(bytes)
+          const stream = PROTO.ByteQueue.from_uint8array(bytes)
           const value = yield* deserializer.deserialize(stream)
           listener(value)
         }
@@ -176,12 +176,12 @@ export namespace DirectIPC {
       return terminate
     }
 
-    once<T>(channel: string, deserializer: Proto.Serializable<T>, listener: (value: T) => void) {
+    once<T>(channel: string, deserializer: PROTO.Serializable<T>, listener: (value: T) => void) {
       const $ = this
       const terminate = NET.listen(`ipc:${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
           const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
-          const stream = ByteQueue.from_uint8array(bytes)
+          const stream = PROTO.ByteQueue.from_uint8array(bytes)
           const value = yield* deserializer.deserialize(stream)
           listener(value)
           terminate()
@@ -193,18 +193,18 @@ export namespace DirectIPC {
 
     handle<T, R>(
       channel: string,
-      deserializer: Proto.Serializable<T>,
-      serializer: Proto.Serializable<R>,
+      deserializer: PROTO.Serializable<T>,
+      serializer: PROTO.Serializable<R>,
       listener: (value: T) => R
     ) {
       const $ = this
       const terminate = NET.listen(`ipc:${$._from}:${channel}:invoke`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
           const bytes = yield* $.MAYBE_DECRYPT(data.bytes)
-          const stream = ByteQueue.from_uint8array(bytes)
+          const stream = PROTO.ByteQueue.from_uint8array(bytes)
           const value = yield* deserializer.deserialize(stream)
           const result = listener(value)
-          const return_stream = new ByteQueue()
+          const return_stream = new PROTO.ByteQueue()
           yield* serializer.serialize(result, return_stream)
           const return_bytes = yield* $.MAYBE_ENCRYPT(return_stream.to_uint8array())
           yield* NET.emit(`ipc:${$._to}:${channel}:handle`, ConnectionSerializer, {
@@ -256,7 +256,7 @@ export namespace DirectIPC {
         })
       })
 
-      NET.listen(`ipc:${this._id}:terminate`, Proto.String, function* (value) {
+      NET.listen(`ipc:${this._id}:terminate`, PROTO.String, function* (value) {
         $._enc_map.delete(value)
       })
     }
@@ -310,12 +310,12 @@ export namespace DirectIPC {
       })
     }
 
-    send<T>(channel: string, serializer: Proto.Serializable<T>, value: T): void {
+    send<T>(channel: string, serializer: PROTO.Serializable<T>, value: T): void {
       const $ = this
       system.runJob(
         (function* () {
           for (const [key, enc] of $._enc_map) {
-            const stream = new ByteQueue()
+            const stream = new PROTO.ByteQueue()
             yield* serializer.serialize(value, stream)
             const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array(), enc)
             yield* NET.emit(`ipc:${key}:${channel}:send`, ConnectionSerializer, {
@@ -329,9 +329,9 @@ export namespace DirectIPC {
 
     invoke<T, R>(
       channel: string,
-      serializer: Proto.Serializable<T>,
+      serializer: PROTO.Serializable<T>,
       value: T,
-      deserializer: Proto.Serializable<R>
+      deserializer: PROTO.Serializable<R>
     ): Promise<R>[] {
       const $ = this
       const promises: Promise<any>[] = []
@@ -339,7 +339,7 @@ export namespace DirectIPC {
       for (const [key, enc] of $._enc_map) {
         system.runJob(
           (function* () {
-            const stream = new ByteQueue()
+            const stream = new PROTO.ByteQueue()
             yield* serializer.serialize(value, stream)
             const bytes = yield* $.MAYBE_ENCRYPT(stream.to_uint8array(), enc)
             yield* NET.emit(`ipc:${key}:${channel}:invoke`, ConnectionSerializer, {
@@ -354,7 +354,7 @@ export namespace DirectIPC {
             const terminate = NET.listen(`ipc:${$._id}:${channel}:handle`, ConnectionSerializer, function* (data) {
               if (data.from === key) {
                 const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-                const stream = ByteQueue.from_uint8array(bytes)
+                const stream = PROTO.ByteQueue.from_uint8array(bytes)
                 const value = yield* deserializer.deserialize(stream)
                 resolve(value)
                 terminate()
@@ -366,26 +366,26 @@ export namespace DirectIPC {
       return promises
     }
 
-    on<T>(channel: string, deserializer: Proto.Serializable<T>, listener: (value: T) => void) {
+    on<T>(channel: string, deserializer: PROTO.Serializable<T>, listener: (value: T) => void) {
       const $ = this
       return NET.listen(`ipc:${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
           const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-          const stream = ByteQueue.from_uint8array(bytes)
+          const stream = PROTO.ByteQueue.from_uint8array(bytes)
           const value = yield* deserializer.deserialize(stream)
           listener(value)
         }
       })
     }
 
-    once<T>(channel: string, deserializer: Proto.Serializable<T>, listener: (value: T) => void) {
+    once<T>(channel: string, deserializer: PROTO.Serializable<T>, listener: (value: T) => void) {
       const $ = this
       const terminate = NET.listen(`ipc:${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
           const bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-          const stream = ByteQueue.from_uint8array(bytes)
+          const stream = PROTO.ByteQueue.from_uint8array(bytes)
           const value = yield* deserializer.deserialize(stream)
           listener(value)
           terminate()
@@ -396,8 +396,8 @@ export namespace DirectIPC {
 
     handle<T, R>(
       channel: string,
-      deserializer: Proto.Serializable<T>,
-      serializer: Proto.Serializable<R>,
+      deserializer: PROTO.Serializable<T>,
+      serializer: PROTO.Serializable<R>,
       listener: (value: T) => R
     ) {
       const $ = this
@@ -405,10 +405,10 @@ export namespace DirectIPC {
         const enc = $._enc_map.get(data.from) as string | false
         if (enc !== undefined) {
           const input_bytes = yield* $.MAYBE_DECRYPT(data.bytes, enc)
-          const input_stream = ByteQueue.from_uint8array(input_bytes)
+          const input_stream = PROTO.ByteQueue.from_uint8array(input_bytes)
           const input_value = yield* deserializer.deserialize(input_stream)
           const result = listener(input_value)
-          const output_stream = new ByteQueue()
+          const output_stream = new PROTO.ByteQueue()
           yield* serializer.serialize(result, output_stream)
           const output_bytes = yield* $.MAYBE_ENCRYPT(output_stream.to_uint8array(), enc)
           yield* NET.emit(`ipc:${data.from}:${channel}:handle`, ConnectionSerializer, {
