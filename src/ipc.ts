@@ -426,52 +426,52 @@ export class Proto {
       }
     }
   }
-  static Array<T>(items: NET.Serializable<T>): NET.Serializable<T[]> {
+  static Array<T>(value: NET.Serializable<T>): NET.Serializable<T[]> {
     return {
-      *serialize(value, stream) {
-        yield* Proto.UVarInt32.serialize(value.length, stream)
-        for (const item of value) {
-          yield* items.serialize(item, stream)
+      *serialize(array, stream) {
+        yield* Proto.UVarInt32.serialize(array.length, stream)
+        for (const item of array) {
+          yield* value.serialize(item, stream)
         }
       },
       *deserialize(stream) {
         const result: T[] = []
         const length = yield* Proto.UVarInt32.deserialize(stream)
         for (let i = 0; i < length; i++) {
-          result[i] = yield* items.deserialize(stream)
+          result[i] = yield* value.deserialize(stream)
         }
         return result
       }
     }
   }
-  static Tuple<T extends any[]>(...items: { [K in keyof T]: NET.Serializable<T[K]> }): NET.Serializable<T> {
+  static Tuple<T extends any[]>(...values: { [K in keyof T]: NET.Serializable<T[K]> }): NET.Serializable<T> {
     return {
-      *serialize(value, stream) {
-        for (let i = 0; i < items.length; i++) {
-          yield* items[i].serialize(value[i], stream)
+      *serialize(tuple, stream) {
+        for (let i = 0; i < values.length; i++) {
+          yield* values[i].serialize(tuple[i], stream)
         }
       },
       *deserialize(stream) {
         const result: any[] = []
-        for (let i = 0; i < items.length; i++) {
-          result[i] = yield* items[i].deserialize(stream)
+        for (let i = 0; i < values.length; i++) {
+          result[i] = yield* values[i].deserialize(stream)
         }
         return result as T
       }
     }
   }
-  static Optional<T>(item: NET.Serializable<T>): NET.Serializable<T | undefined> {
+  static Optional<T>(value: NET.Serializable<T>): NET.Serializable<T | undefined> {
     return {
-      *serialize(value, stream) {
+      *serialize(optional, stream) {
         yield* Proto.Boolean.serialize(value !== undefined, stream)
-        if (value !== undefined) {
-          yield* item.serialize(value, stream)
+        if (optional !== undefined) {
+          yield* value.serialize(optional, stream)
         }
       },
       *deserialize(stream) {
         const defined = yield* Proto.Boolean.deserialize(stream)
         if (defined) {
-          return yield* item.deserialize(stream)
+          return yield* value.deserialize(stream)
         }
       }
     }
