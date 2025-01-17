@@ -68,17 +68,6 @@ export namespace SERDE {
       return []
     }
 
-    shift_front(amount: number = 1): void {
-      const max_amount = amount > this._length ? this._length : amount
-      this._length -= max_amount
-      this._offset += max_amount
-    }
-
-    shift_end(amount: number = 1): void {
-      this.ensure_capacity(amount)
-      this._length += amount
-    }
-
     ensure_capacity(size: number) {
       if (this.end + size > this._buffer.length) {
         const larger_buffer = new Uint8Array((this.end + size) * 2)
@@ -249,73 +238,73 @@ export class Proto {
   }
   static Int8: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.ensure_capacity(1)
-      stream.data_view.setInt8(stream.end, value)
-      stream.shift_end(1)
+      const length = 1
+      stream.write(...Array(length).fill(0))
+      stream.data_view.setInt8(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getInt8(stream.front)
-      stream.shift_front(1)
+      stream.read(1)
       return value
     }
   }
   static Int16: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.ensure_capacity(2)
-      stream.data_view.setInt16(stream.end, value)
-      stream.shift_end(2)
+      const length = 2
+      stream.write(...Array(length).fill(0))
+      stream.data_view.setInt16(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getInt16(stream.front)
-      stream.shift_front(2)
+      stream.read(2)
       return value
     }
   }
   static Int32: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.ensure_capacity(4)
-      stream.data_view.setInt32(stream.end, value)
-      stream.shift_end(4)
+      const length = 4
+      stream.write(...Array(length).fill(0))
+      stream.data_view.setInt32(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getInt32(stream.front)
-      stream.shift_front(4)
+      stream.read(4)
       return value
     }
   }
   static UInt8: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.ensure_capacity(1)
-      stream.data_view.setUint8(stream.end, value)
-      stream.shift_end(1)
+      const length = 1
+      stream.write(...Array(length).fill(0))
+      stream.data_view.setUint8(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getUint8(stream.front)
-      stream.shift_front(1)
+      stream.read(1)
       return value
     }
   }
   static UInt16: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.ensure_capacity(2)
-      stream.data_view.setUint16(stream.end, value)
-      stream.shift_end(2)
+      const length = 2
+      stream.write(...Array(length).fill(0))
+      stream.data_view.setUint16(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getUint16(stream.front)
-      stream.shift_front(2)
+      stream.read(2)
       return value
     }
   }
   static UInt32: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.ensure_capacity(4)
-      stream.data_view.setUint32(stream.end, value)
-      stream.shift_end(4)
+      const length = 4
+      stream.write(...Array(length).fill(0))
+      stream.data_view.setUint32(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getUint32(stream.front)
-      stream.shift_front(4)
+      stream.read(4)
       return value
     }
   }
@@ -343,25 +332,25 @@ export class Proto {
   }
   static Float32: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.ensure_capacity(4)
-      stream.data_view.setFloat32(stream.end, value)
-      stream.shift_end(4)
+      const length = 4
+      stream.write(...Array(length).fill(0))
+      stream.data_view.setFloat32(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getFloat32(stream.front)
-      stream.shift_front(4)
+      stream.read(4)
       return value
     }
   }
   static Float64: NET.Serializable<number> = {
     *serialize(value, stream) {
-      stream.ensure_capacity(8)
-      stream.data_view.setFloat64(stream.end, value)
-      stream.shift_end(8)
+      const length = 8
+      stream.write(...Array(length).fill(0))
+      stream.data_view.setFloat64(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getFloat64(stream.front)
-      stream.shift_front(8)
+      stream.read(8)
       return value
     }
   }
