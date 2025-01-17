@@ -462,6 +462,7 @@ export class Proto {
         if (defined) {
           return yield* value.deserialize(stream)
         }
+        return undefined
       }
     }
   }
