@@ -513,7 +513,7 @@ export namespace NET {
     }
   }
   function generate_id(): string {
-    const r = ((Math.random() * 0x100000000) & Date.now()) >>> 0
+    const r = (Math.random() * 0x100000000) >>> 0
     return (
       (r & 0xff).toString(16).padStart(2, '0') +
       ((r >> 8) & 0xff).toString(16).padStart(2, '0') +
