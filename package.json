@@ -16,8 +16,7 @@
   "main": "dist/ipc.js",
   "types": "dist/ipc.d.ts",
   "files": [
-    "dist/ipc.js",
-    "dist/ipc.d.ts"
+    "dist"
   ],
   "scripts": {
     "build": "tsc",
