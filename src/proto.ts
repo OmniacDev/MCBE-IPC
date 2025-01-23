@@ -93,7 +93,7 @@ export namespace PROTO {
         return ByteQueue.from_uint8array(new Uint8Array(result))
       }
       return new ByteQueue()
-    } 
+    }
   }
   export const Void: PROTO.Serializable<void> = {
     *serialize() {},
