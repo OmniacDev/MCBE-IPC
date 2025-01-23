@@ -68,30 +68,32 @@ export namespace PROTO {
       return this._buffer.subarray(this._offset, this.end)
     }
   }
-  export function* MIPS_serialize(byte_queue: ByteQueue): Generator<void, string, void> {
-    const uint8array = byte_queue.to_uint8array()
+  export namespace MIPS {
+    export function* serialize(byte_queue: PROTO.ByteQueue): Generator<void, string, void> {
+      const uint8array = byte_queue.to_uint8array()
 
-    let str = '(0x'
-    for (let i = 0; i < uint8array.length; i++) {
-      const hex = uint8array[i].toString(16).padStart(2, '0').toUpperCase()
-      str += hex
-      yield
-    }
-    str += ')'
-    return str
-  }
-  export function* MIPS_deserialize(str: string): Generator<void, ByteQueue, void> {
-    if (str.startsWith('(0x') && str.endsWith(')')) {
-      const result = []
-      const hex_str = str.slice(3, str.length - 1)
-      for (let i = 0; i < hex_str.length; i++) {
-        const hex = hex_str[i] + hex_str[++i]
-        result.push(parseInt(hex, 16))
+      let str = '(0x'
+      for (let i = 0; i < uint8array.length; i++) {
+        const hex = uint8array[i].toString(16).padStart(2, '0').toUpperCase()
+        str += hex
         yield
       }
-      return ByteQueue.from_uint8array(new Uint8Array(result))
+      str += ')'
+      return str
     }
-    return new ByteQueue()
+    export function* deserialize(str: string): Generator<void, PROTO.ByteQueue, void> {
+      if (str.startsWith('(0x') && str.endsWith(')')) {
+        const result = []
+        const hex_str = str.slice(3, str.length - 1)
+        for (let i = 0; i < hex_str.length; i++) {
+          const hex = hex_str[i] + hex_str[++i]
+          result.push(parseInt(hex, 16))
+          yield
+        }
+        return ByteQueue.from_uint8array(new Uint8Array(result))
+      }
+      return new ByteQueue()
+    } 
   }
   export const Void: PROTO.Serializable<void> = {
     *serialize() {},

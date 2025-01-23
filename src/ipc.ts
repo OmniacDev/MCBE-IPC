@@ -95,30 +95,32 @@ export namespace PROTO {
       return this._buffer.subarray(this._offset, this.end)
     }
   }
-  export function* MIPS_serialize(byte_queue: ByteQueue): Generator<void, string, void> {
-    const uint8array = byte_queue.to_uint8array()
+  export namespace MIPS {
+    export function* serialize(byte_queue: PROTO.ByteQueue): Generator<void, string, void> {
+      const uint8array = byte_queue.to_uint8array()
 
-    let str = '(0x'
-    for (let i = 0; i < uint8array.length; i++) {
-      const hex = uint8array[i].toString(16).padStart(2, '0').toUpperCase()
-      str += hex
-      yield
-    }
-    str += ')'
-    return str
-  }
-  export function* MIPS_deserialize(str: string): Generator<void, ByteQueue, void> {
-    if (str.startsWith('(0x') && str.endsWith(')')) {
-      const result = []
-      const hex_str = str.slice(3, str.length - 1)
-      for (let i = 0; i < hex_str.length; i++) {
-        const hex = hex_str[i] + hex_str[++i]
-        result.push(parseInt(hex, 16))
+      let str = '(0x'
+      for (let i = 0; i < uint8array.length; i++) {
+        const hex = uint8array[i].toString(16).padStart(2, '0').toUpperCase()
+        str += hex
         yield
       }
-      return ByteQueue.from_uint8array(new Uint8Array(result))
+      str += ')'
+      return str
     }
-    return new ByteQueue()
+    export function* deserialize(str: string): Generator<void, PROTO.ByteQueue, void> {
+      if (str.startsWith('(0x') && str.endsWith(')')) {
+        const result = []
+        const hex_str = str.slice(3, str.length - 1)
+        for (let i = 0; i < hex_str.length; i++) {
+          const hex = hex_str[i] + hex_str[++i]
+          result.push(parseInt(hex, 16))
+          yield
+        }
+        return ByteQueue.from_uint8array(new Uint8Array(result))
+      }
+      return new ByteQueue()
+    }
   }
   export const Void: PROTO.Serializable<void> = {
     *serialize() {},
@@ -478,13 +480,13 @@ export namespace NET {
       (function* () {
         const [serialized_endpoint, serialized_header] = event.id.split(':')
 
-        const endpoint_stream: PROTO.ByteQueue = yield* PROTO.MIPS_deserialize(serialized_endpoint)
+        const endpoint_stream: PROTO.ByteQueue = yield* PROTO.MIPS.deserialize(serialized_endpoint)
 
         const endpoint: PROTO.Endpoint = yield* PROTO.Endpoint.deserialize(endpoint_stream)
 
         const listeners = ENDPOINTS.get(endpoint)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
-          const header_stream: PROTO.ByteQueue = yield* PROTO.MIPS_deserialize(serialized_header)
+          const header_stream: PROTO.ByteQueue = yield* PROTO.MIPS.deserialize(serialized_header)
 
           const header: PROTO.Header = yield* PROTO.Header.deserialize(header_stream)
           for (let i = 0; i < listeners.length; i++) {
@@ -527,12 +529,12 @@ export namespace NET {
 
     const endpoint_stream = new PROTO.ByteQueue()
     yield* PROTO.Endpoint.serialize(endpoint, endpoint_stream)
-    const serialized_endpoint = yield* PROTO.MIPS_serialize(endpoint_stream)
+    const serialized_endpoint = yield* PROTO.MIPS.serialize(endpoint_stream)
 
     const RUN = function* (header: PROTO.Header, serialized_packet: string) {
       const header_stream = new PROTO.ByteQueue()
       yield* PROTO.Header.serialize(header, header_stream)
-      const serialized_header = yield* PROTO.MIPS_serialize(header_stream)
+      const serialized_header = yield* PROTO.MIPS.serialize(header_stream)
       world
         .getDimension('overworld')
         .runCommand(`scriptevent ${serialized_endpoint}:${serialized_header} ${serialized_packet}`)
