@@ -524,7 +524,11 @@ export namespace NET {
     ).toUpperCase()
   }
 
-  export function* emit<T>(endpoint: string, serializer: PROTO.Serializable<T>, value: T): Generator<void, void, void> {
+  export function* emit<S extends PROTO.Serializable<T>, T>(
+    endpoint: string,
+    serializer: S & PROTO.Serializable<T>,
+    value: T
+  ): Generator<void, void, void> {
     const guid = generate_id()
 
     const endpoint_stream = new PROTO.ByteQueue()
@@ -550,9 +554,9 @@ export namespace NET {
       yield* RUN({ guid, encoding: ENCODING, index: i, final: i === serialized_packets.length - 1 }, serialized_packet)
     }
   }
-  export function listen<T>(
+  export function listen<T, S extends PROTO.Serializable<T>>(
     endpoint: string,
-    serializer: PROTO.Serializable<T>,
+    serializer: S & PROTO.Serializable<T>,
     callback: (value: T) => Generator<void, void, void>
   ) {
     const buffer = new Map<string, { size: number; serialized_packets: string[]; data_size: number }>()
@@ -586,16 +590,20 @@ export namespace NET {
 
 export namespace IPC {
   /** Sends a message with `args` to `channel` */
-  export function send<T>(channel: string, serializer: PROTO.Serializable<T>, value: T): void {
+  export function send<S extends PROTO.Serializable<T>, T>(
+    channel: string,
+    serializer: S & PROTO.Serializable<T>,
+    value: T
+  ): void {
     system.runJob(NET.emit(`ipc:${channel}:send`, serializer, value))
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke<T, R>(
+  export function invoke<TS extends PROTO.Serializable<T>, T, RS extends PROTO.Serializable<R>, R>(
     channel: string,
-    serializer: PROTO.Serializable<T>,
+    serializer: TS & PROTO.Serializable<T>,
     value: T,
-    deserializer: PROTO.Serializable<R>
+    deserializer: RS & PROTO.Serializable<R>
   ): Promise<R> {
     system.runJob(NET.emit(`ipc:${channel}:invoke`, serializer, value))
     return new Promise(resolve => {
@@ -607,9 +615,9 @@ export namespace IPC {
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<T>(
+  export function on<S extends PROTO.Serializable<T>, T>(
     channel: string,
-    deserializer: PROTO.Serializable<T>,
+    deserializer: S & PROTO.Serializable<T>,
     listener: (value: T) => void
   ): () => void {
     return NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
@@ -618,7 +626,11 @@ export namespace IPC {
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<T>(channel: string, deserializer: PROTO.Serializable<T>, listener: (value: T) => void) {
+  export function once<S extends PROTO.Serializable<T>, T>(
+    channel: string,
+    deserializer: S & PROTO.Serializable<T>,
+    listener: (value: T) => void
+  ) {
     const terminate = NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
       listener(value)
       terminate()
@@ -627,10 +639,10 @@ export namespace IPC {
   }
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle<T, R>(
+  export function handle<TS extends PROTO.Serializable<T>, T, RS extends PROTO.Serializable<R>, R>(
     channel: string,
-    deserializer: PROTO.Serializable<T>,
-    serializer: PROTO.Serializable<R>,
+    deserializer: TS & PROTO.Serializable<T>,
+    serializer: RS & PROTO.Serializable<R>,
     listener: (value: T) => R
   ): () => void {
     return NET.listen(`ipc:${channel}:invoke`, deserializer, function* (value) {
