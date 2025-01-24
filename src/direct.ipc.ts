@@ -140,7 +140,7 @@ export namespace DirectIPC {
       }
     }
 
-    send<T>(channel: string, serializer: PROTO.Serializable<T>, value: T): void {
+    send<S extends PROTO.Serializable<T>, T>(channel: string, serializer: S & PROTO.Serializable<T>, value: T): void {
       const $ = this
       system.runJob(
         (function* () {
@@ -155,11 +155,11 @@ export namespace DirectIPC {
       )
     }
 
-    invoke<T, R>(
+    invoke<TS extends PROTO.Serializable<T>, T, RS extends PROTO.Serializable<R>, R>(
       channel: string,
-      serializer: PROTO.Serializable<T>,
+      serializer: TS & PROTO.Serializable<T>,
       value: T,
-      deserializer: PROTO.Serializable<R>
+      deserializer: RS & PROTO.Serializable<R>
     ): Promise<R> {
       const $ = this
       system.runJob(
@@ -187,7 +187,11 @@ export namespace DirectIPC {
       })
     }
 
-    on<T>(channel: string, deserializer: PROTO.Serializable<T>, listener: (value: T) => void) {
+    on<S extends PROTO.Serializable<T>, T>(
+      channel: string,
+      deserializer: S & PROTO.Serializable<T>,
+      listener: (value: T) => void
+    ) {
       const $ = this
       const terminate = NET.listen(`ipc:${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
@@ -201,7 +205,11 @@ export namespace DirectIPC {
       return terminate
     }
 
-    once<T>(channel: string, deserializer: PROTO.Serializable<T>, listener: (value: T) => void) {
+    once<S extends PROTO.Serializable<T>, T>(
+      channel: string,
+      deserializer: S & PROTO.Serializable<T>,
+      listener: (value: T) => void
+    ) {
       const $ = this
       const terminate = NET.listen(`ipc:${$._from}:${channel}:send`, ConnectionSerializer, function* (data) {
         if (data.from === $._to) {
@@ -216,10 +224,10 @@ export namespace DirectIPC {
       return terminate
     }
 
-    handle<T, R>(
+    handle<TS extends PROTO.Serializable<T>, T, RS extends PROTO.Serializable<R>, R>(
       channel: string,
-      deserializer: PROTO.Serializable<T>,
-      serializer: PROTO.Serializable<R>,
+      deserializer: TS & PROTO.Serializable<T>,
+      serializer: RS & PROTO.Serializable<R>,
       listener: (value: T) => R
     ) {
       const $ = this
@@ -335,7 +343,7 @@ export namespace DirectIPC {
       })
     }
 
-    send<T>(channel: string, serializer: PROTO.Serializable<T>, value: T): void {
+    send<S extends PROTO.Serializable<T>, T>(channel: string, serializer: S & PROTO.Serializable<T>, value: T): void {
       const $ = this
       system.runJob(
         (function* () {
@@ -352,11 +360,11 @@ export namespace DirectIPC {
       )
     }
 
-    invoke<T, R>(
+    invoke<TS extends PROTO.Serializable<T>, T, RS extends PROTO.Serializable<R>, R>(
       channel: string,
-      serializer: PROTO.Serializable<T>,
+      serializer: TS & PROTO.Serializable<T>,
       value: T,
-      deserializer: PROTO.Serializable<R>
+      deserializer: RS & PROTO.Serializable<R>
     ): Promise<R>[] {
       const $ = this
       const promises: Promise<any>[] = []
@@ -391,7 +399,11 @@ export namespace DirectIPC {
       return promises
     }
 
-    on<T>(channel: string, deserializer: PROTO.Serializable<T>, listener: (value: T) => void) {
+    on<S extends PROTO.Serializable<T>, T>(
+      channel: string,
+      deserializer: S & PROTO.Serializable<T>,
+      listener: (value: T) => void
+    ) {
       const $ = this
       return NET.listen(`ipc:${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
         const enc = $._enc_map.get(data.from) as string | false
@@ -404,7 +416,11 @@ export namespace DirectIPC {
       })
     }
 
-    once<T>(channel: string, deserializer: PROTO.Serializable<T>, listener: (value: T) => void) {
+    once<S extends PROTO.Serializable<T>, T>(
+      channel: string,
+      deserializer: S & PROTO.Serializable<T>,
+      listener: (value: T) => void
+    ) {
       const $ = this
       const terminate = NET.listen(`ipc:${$._id}:${channel}:send`, ConnectionSerializer, function* (data) {
         const enc = $._enc_map.get(data.from) as string | false
@@ -419,10 +435,10 @@ export namespace DirectIPC {
       return terminate
     }
 
-    handle<T, R>(
+    handle<TS extends PROTO.Serializable<T>, T, RS extends PROTO.Serializable<R>, R>(
       channel: string,
-      deserializer: PROTO.Serializable<T>,
-      serializer: PROTO.Serializable<R>,
+      deserializer: TS & PROTO.Serializable<T>,
+      serializer: RS & PROTO.Serializable<R>,
       listener: (value: T) => R
     ) {
       const $ = this
