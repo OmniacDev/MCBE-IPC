@@ -124,6 +124,18 @@ export namespace PROTO {
     *serialize() {},
     *deserialize() {}
   }
+  export const Null: PROTO.Serializable<null> = {
+    *serialize() {},
+    *deserialize() {
+      return null
+    }
+  }
+  export const Undefined: PROTO.Serializable<undefined> = {
+    *serialize() {},
+    *deserialize() {
+      return undefined
+    }
+  }
   export const Int8: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 1
