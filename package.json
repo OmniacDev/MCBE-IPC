@@ -6,7 +6,7 @@
   "version": "3.0.3",
   "repository": {
     "type": "git",
-    "url": "https://github.com/OmniacDev/mcbe-ipc.git"
+    "url": "git+https://github.com/OmniacDev/mcbe-ipc.git"
   },
   "bugs": {
     "url": "https://github.com/OmniacDev/mcbe-ipc/issues"
