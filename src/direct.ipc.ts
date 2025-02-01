@@ -46,23 +46,15 @@ namespace CRYPTO {
     return result
   }
 
-  export function make_secret(mod: number = CRYPTO.MOD): number {
+  export function make_secret(mod: number): number {
     return Math.floor(Math.random() * (mod - 1)) + 1
   }
 
-  export function* make_public(
-    secret: number,
-    mod: number = CRYPTO.MOD,
-    prime: number = CRYPTO.PRIME
-  ): Generator<void, string, void> {
+  export function* make_public(secret: number, mod: number, prime: number): Generator<void, string, void> {
     return to_HEX(yield* mod_exp(mod, secret, prime))
   }
 
-  export function* make_shared(
-    secret: number,
-    other: string,
-    prime: number = CRYPTO.PRIME
-  ): Generator<void, string, void> {
+  export function* make_shared(secret: number, other: string, prime: number): Generator<void, string, void> {
     return to_HEX(yield* mod_exp(to_NUM(other), secret, prime))
   }
 
@@ -294,7 +286,13 @@ export namespace DirectIPC {
       })
     }
 
-    connect(to: string, encrypted: boolean = false, timeout: number = 20): Promise<Connection> {
+    connect(
+      to: string,
+      encrypted: boolean = false,
+      timeout: number = 20,
+      mod: number = CRYPTO.MOD,
+      prime: number = CRYPTO.PRIME
+    ): Promise<Connection> {
       const $ = this
       return new Promise((resolve, reject) => {
         const con = this._con_map.get(to)
@@ -302,16 +300,16 @@ export namespace DirectIPC {
           con.terminate(false)
           resolve(con)
         } else {
-          const secret = CRYPTO.make_secret()
+          const secret = CRYPTO.make_secret(mod)
           system.runJob(
             (function* () {
-              const public_key = yield* CRYPTO.make_public(secret)
+              const public_key = yield* CRYPTO.make_public(secret, mod, prime)
               yield* NET.emit(`ipc:${to}:handshake:synchronize`, HandshakeSynchronizeSerializer, {
                 from: $._id,
                 encryption_enabled: encrypted,
                 encryption_public_key: public_key,
-                encryption_prime: CRYPTO.PRIME,
-                encryption_modulus: CRYPTO.MOD
+                encryption_prime: prime,
+                encryption_modulus: mod
               })
             })()
           )
@@ -330,7 +328,7 @@ export namespace DirectIPC {
               if (data.from === to) {
                 const enc =
                   data.encryption_enabled || encrypted
-                    ? yield* CRYPTO.make_shared(secret, data.encryption_public_key)
+                    ? yield* CRYPTO.make_shared(secret, data.encryption_public_key, prime)
                     : false
                 const new_con = new Connection($._id, to, enc)
                 $._con_map.set(to, new_con)
