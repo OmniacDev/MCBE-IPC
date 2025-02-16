@@ -445,7 +445,7 @@ export namespace NET {
     for (let i = 0; i < uint8array.length; i++) {
       const char_code = uint8array[i] | (uint8array[++i] << 8)
       const utf16_size = char_code <= 0x7f ? 1 : char_code <= 0x7ff ? 2 : char_code <= 0xffff ? 3 : 4
-      const char_size = char_code > 0xff ? utf16_size : 3
+      const char_size = char_code > 0xff ? utf16_size : 2
       if (acc_size + char_size > max_size) {
         result.push(acc_str)
         acc_str = ''
