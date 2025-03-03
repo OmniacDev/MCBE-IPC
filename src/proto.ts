@@ -354,7 +354,7 @@ export namespace PROTO {
   export function Optional<T>(value: PROTO.Serializable<T>): PROTO.Serializable<T | undefined> {
     return {
       *serialize(optional, stream) {
-        yield* PROTO.Boolean.serialize(value !== undefined, stream)
+        yield* PROTO.Boolean.serialize(optional !== undefined, stream)
         if (optional !== undefined) {
           yield* value.serialize(optional, stream)
         }
