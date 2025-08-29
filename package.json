@@ -6,12 +6,12 @@
   "version": "3.1.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OmniacDev/mcbe-ipc.git"
+    "url": "git+https://github.com/OmniacDev/MCBE-IPC.git"
   },
   "bugs": {
-    "url": "https://github.com/OmniacDev/mcbe-ipc/issues"
+    "url": "https://github.com/OmniacDev/MCBE-IPC/issues"
   },
-  "homepage": "https://github.com/OmniacDev/mcbe-ipc",
+  "homepage": "https://github.com/OmniacDev/MCBE-IPC",
   "type": "module",
   "main": "dist/ipc.js",
   "types": "dist/ipc.d.ts",
