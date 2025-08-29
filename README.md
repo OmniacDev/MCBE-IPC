@@ -1,6 +1,6 @@
 # MCBE-IPC 📡
 
-An IPC system for Minecraft Bedrock Edition Script API projects
+An IPC[^1] system for Minecraft Bedrock Edition Script API projects
 
 ## 🔗 Dependencies
 
