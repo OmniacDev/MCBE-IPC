@@ -84,12 +84,12 @@ export namespace PROTO {
     }
 
     static from_uint8array(array: Uint8Array) {
-      const byte_queue = new Buffer()
-      byte_queue._buffer = array
-      byte_queue._length = array.length
-      byte_queue._offset = 0
-      byte_queue._data_view = new DataView(array.buffer)
-      return byte_queue
+      const buffer = new Buffer()
+      buffer._buffer = array
+      buffer._length = array.length
+      buffer._offset = 0
+      buffer._data_view = new DataView(array.buffer)
+      return buffer
     }
 
     to_uint8array() {
@@ -454,12 +454,12 @@ export namespace PROTO {
 export namespace NET {
   type Listener = (header: PROTO.Header, serialized_packet: string) => Generator<void, void, void>
 
-  const FRAG_MAX: number = 2048
+  export let FRAG_MAX: number = 2048
   const ENCODING: string = 'mcbe-ipc:v3'
   const ENDPOINTS = new Map<PROTO.Endpoint, Array<Listener>>()
 
-  export function* serialize(byte_queue: PROTO.Buffer, max_size: number = Infinity): Generator<void, string[], void> {
-    const uint8array = byte_queue.to_uint8array()
+  export function* serialize(buffer: PROTO.Buffer, max_size: number = Infinity): Generator<void, string[], void> {
+    const uint8array = buffer.to_uint8array()
     const result: string[] = []
 
     let acc_str: string = ''
