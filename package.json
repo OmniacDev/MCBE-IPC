@@ -3,15 +3,15 @@
   "author": "OmniacDev",
   "description": "IPC system for MCBE Script API projects",
   "license": "MIT",
-  "version": "3.0.4",
+  "version": "3.1.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OmniacDev/mcbe-ipc.git"
+    "url": "git+https://github.com/OmniacDev/MCBE-IPC.git"
   },
   "bugs": {
-    "url": "https://github.com/OmniacDev/mcbe-ipc/issues"
+    "url": "https://github.com/OmniacDev/MCBE-IPC/issues"
   },
-  "homepage": "https://github.com/OmniacDev/mcbe-ipc",
+  "homepage": "https://github.com/OmniacDev/MCBE-IPC",
   "type": "module",
   "main": "dist/ipc.js",
   "types": "dist/ipc.d.ts",
@@ -28,6 +28,6 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
-    "@minecraft/server": "^1.13.0"
+    "@minecraft/server": "^1.18.0"
   }
 }
