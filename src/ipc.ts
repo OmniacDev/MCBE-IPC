@@ -27,11 +27,11 @@ import { ScriptEventSource, system } from '@minecraft/server'
 
 export namespace PROTO {
   export interface Serializable<T> {
-    serialize(value: T, stream: ByteBuffer): Generator<void, void, void>
-    deserialize(stream: ByteBuffer): Generator<void, T, void>
+    serialize(value: T, stream: Buffer): Generator<void, void, void>
+    deserialize(stream: Buffer): Generator<void, T, void>
   }
 
-  export class ByteBuffer {
+  export class Buffer {
     private _buffer: Uint8Array
     private _data_view: DataView
     private _length: number
@@ -84,7 +84,7 @@ export namespace PROTO {
     }
 
     static from_uint8array(array: Uint8Array) {
-      const buffer = new ByteBuffer()
+      const buffer = new Buffer()
       buffer._buffer = array
       buffer._length = array.length
       buffer._offset = 0
@@ -98,7 +98,7 @@ export namespace PROTO {
   }
 
   export namespace MIPS {
-    export function* serialize(stream: PROTO.ByteBuffer): Generator<void, string, void> {
+    export function* serialize(stream: PROTO.Buffer): Generator<void, string, void> {
       const uint8array = stream.to_uint8array()
 
       let str = '(0x'
@@ -110,9 +110,9 @@ export namespace PROTO {
       str += ')'
       return str
     }
-    export function* deserialize(str: string): Generator<void, PROTO.ByteBuffer, void> {
+    export function* deserialize(str: string): Generator<void, PROTO.Buffer, void> {
       if (str.startsWith('(0x') && str.endsWith(')')) {
-        const buffer = new ByteBuffer()
+        const buffer = new Buffer()
         const hex_str = str.slice(3, str.length - 1)
         for (let i = 0; i < hex_str.length; i++) {
           const hex = hex_str[i] + hex_str[++i]
@@ -121,7 +121,7 @@ export namespace PROTO {
         }
         return buffer
       }
-      return new ByteBuffer()
+      return new Buffer()
     }
   }
 
@@ -301,20 +301,20 @@ export namespace PROTO {
   }
 
   export const UInt8Array: PROTO.Serializable<Uint8Array> = {
-    *serialize(value: Uint8Array, stream: ByteBuffer) {
+    *serialize(value: Uint8Array, stream: Buffer) {
       yield* PROTO.UVarInt32.serialize(value.length, stream)
       stream.write(...value)
     },
-    *deserialize(stream: ByteBuffer) {
+    *deserialize(stream: Buffer) {
       const length = yield* PROTO.UVarInt32.deserialize(stream)
       return new Uint8Array(stream.read(length))
     }
   }
   export const Date: PROTO.Serializable<Date> = {
-    *serialize(value: Date, stream: ByteBuffer) {
+    *serialize(value: Date, stream: Buffer) {
       yield* PROTO.Float64.serialize(value.getTime(), stream)
     },
-    *deserialize(stream: ByteBuffer) {
+    *deserialize(stream: Buffer) {
       return new globalThis.Date(yield* PROTO.Float64.deserialize(stream))
     }
   }
@@ -458,8 +458,8 @@ export namespace NET {
   const ENCODING: string = 'mcbe-ipc:v3'
   const ENDPOINTS = new Map<PROTO.Endpoint, Array<Listener>>()
 
-  export function* serialize(stream: PROTO.ByteBuffer, max_size: number = Infinity): Generator<void, string[], void> {
-    const uint8array = stream.to_uint8array()
+  export function* serialize(buffer: PROTO.Buffer, max_size: number = Infinity): Generator<void, string[], void> {
+    const uint8array = buffer.to_uint8array()
     const result: string[] = []
 
     let acc_str: string = ''
@@ -488,8 +488,8 @@ export namespace NET {
     return result
   }
 
-  export function* deserialize(strings: string[]): Generator<void, PROTO.ByteBuffer, void> {
-    const buffer = new PROTO.ByteBuffer()
+  export function* deserialize(strings: string[]): Generator<void, PROTO.Buffer, void> {
+    const buffer = new PROTO.Buffer()
     for (let i = 0; i < strings.length; i++) {
       const str = strings[i]
       for (let j = 0; j < str.length; j++) {
@@ -515,13 +515,13 @@ export namespace NET {
       (function* () {
         const [serialized_endpoint, serialized_header] = event.id.split(':')
 
-        const endpoint_stream: PROTO.ByteBuffer = yield* PROTO.MIPS.deserialize(serialized_endpoint)
+        const endpoint_stream: PROTO.Buffer = yield* PROTO.MIPS.deserialize(serialized_endpoint)
 
         const endpoint: PROTO.Endpoint = yield* PROTO.Endpoint.deserialize(endpoint_stream)
 
         const listeners = ENDPOINTS.get(endpoint)
         if (event.sourceType === ScriptEventSource.Server && listeners) {
-          const header_stream: PROTO.ByteBuffer = yield* PROTO.MIPS.deserialize(serialized_header)
+          const header_stream: PROTO.Buffer = yield* PROTO.MIPS.deserialize(serialized_header)
 
           const header: PROTO.Header = yield* PROTO.Header.deserialize(header_stream)
           for (let i = 0; i < listeners.length; i++) {
@@ -567,11 +567,11 @@ export namespace NET {
   ): Generator<void, void, void> {
     const guid = generate_id()
 
-    const endpoint_stream = new PROTO.ByteBuffer()
+    const endpoint_stream = new PROTO.Buffer()
     yield* PROTO.Endpoint.serialize(endpoint, endpoint_stream)
     const serialized_endpoint = yield* PROTO.MIPS.serialize(endpoint_stream)
 
-    const packet_stream = new PROTO.ByteBuffer()
+    const packet_stream = new PROTO.Buffer()
     yield* serializer.serialize(value, packet_stream)
 
     const serialized_packets = yield* serialize(packet_stream, FRAG_MAX)
@@ -579,7 +579,7 @@ export namespace NET {
       const serialized_packet = serialized_packets[i]
 
       const header: PROTO.Header = { guid, encoding: ENCODING, index: i, final: i === serialized_packets.length - 1 }
-      const header_stream = new PROTO.ByteBuffer()
+      const header_stream = new PROTO.Buffer()
       yield* PROTO.Header.serialize(header, header_stream)
       const serialized_header = yield* PROTO.MIPS.serialize(header_stream)
       system.sendScriptEvent(`${serialized_endpoint}:${serialized_header}`, serialized_packet)
