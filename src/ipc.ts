@@ -83,6 +83,15 @@ export namespace PROTO {
       }
     }
 
+    static from_uint8array(array: Uint8Array) {
+      const buffer = new Buffer()
+      buffer._buffer = array
+      buffer._length = array.length
+      buffer._offset = 0
+      buffer._data_view = new DataView(array.buffer)
+      return buffer
+    }
+
     to_uint8array() {
       return this._buffer.subarray(this._offset, this.end)
     }
