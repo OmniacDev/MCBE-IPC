@@ -83,15 +83,6 @@ export namespace PROTO {
       }
     }
 
-    static from_uint8array(array: Uint8Array) {
-      const buffer = new Buffer()
-      buffer._buffer = array
-      buffer._length = array.length
-      buffer._offset = 0
-      buffer._data_view = new DataView(array.buffer)
-      return buffer
-    }
-
     to_uint8array() {
       return this._buffer.subarray(this._offset, this.end)
     }
@@ -112,14 +103,14 @@ export namespace PROTO {
     }
     export function* deserialize(str: string): Generator<void, PROTO.Buffer, void> {
       if (str.startsWith('(0x') && str.endsWith(')')) {
-        const result = []
+        const buffer = new Buffer()
         const hex_str = str.slice(3, str.length - 1)
         for (let i = 0; i < hex_str.length; i++) {
           const hex = hex_str[i] + hex_str[++i]
-          result.push(parseInt(hex, 16))
+          buffer.write(parseInt(hex, 16))
           yield
         }
-        return Buffer.from_uint8array(new Uint8Array(result))
+        return buffer
       }
       return new Buffer()
     }
@@ -489,7 +480,7 @@ export namespace NET {
   }
 
   export function* deserialize(strings: string[]): Generator<void, PROTO.Buffer, void> {
-    const result: number[] = []
+    const buffer = new PROTO.Buffer()
     for (let i = 0; i < strings.length; i++) {
       const str = strings[i]
       for (let j = 0; j < str.length; j++) {
@@ -497,17 +488,17 @@ export namespace NET {
         if (char_code <= 0xff) {
           const hex = str[j] + str[++j]
           const hex_code = parseInt(hex, 16)
-          result.push(hex_code & 0xff)
-          result.push(hex_code >> 8)
+          buffer.write(hex_code & 0xff)
+          buffer.write(hex_code >> 8)
         } else {
-          result.push(char_code & 0xff)
-          result.push(char_code >> 8)
+          buffer.write(char_code & 0xff)
+          buffer.write(char_code >> 8)
         }
         yield
       }
       yield
     }
-    return PROTO.Buffer.from_uint8array(new Uint8Array(result))
+    return buffer
   }
 
   system.afterEvents.scriptEventReceive.subscribe(event => {
