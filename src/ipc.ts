@@ -56,21 +56,34 @@ export namespace PROTO {
       this._offset = 0
     }
 
-    write(...values: number[]): void {
-      this.ensure_capacity(values.length)
-      this._buffer.set(values, this.end)
-      this._length += values.length
+    write_byte(byte: number): void {
+      this.ensure_capacity(1)
+      this._buffer[this.end] = byte
+      this._length++
     }
 
-    read(amount: number = 1): number[] {
+    write_bytes(bytes: Uint8Array): void {
+      this.ensure_capacity(bytes.length)
+      this._buffer.set(bytes, this.end)
+      this._length += bytes.length
+    }
+
+    read_byte(): number {
+      const byte = this._buffer[this._offset]
+      this._length--
+      this._offset++
+      return byte
+    }
+
+    read_bytes(amount: number): Uint8Array {
       if (this._length > 0) {
         const max_amount = amount > this._length ? this._length : amount
-        const values = this._buffer.subarray(this._offset, this._offset + max_amount)
+        const values = this._buffer.slice(this._offset, this._offset + max_amount)
         this._length -= max_amount
         this._offset += max_amount
-        return globalThis.Array.from(values)
+        return values
       }
-      return []
+      return new Uint8Array()
     }
 
     ensure_capacity(size: number) {
@@ -116,7 +129,7 @@ export namespace PROTO {
         const hex_str = str.slice(3, str.length - 1)
         for (let i = 0; i < hex_str.length; i++) {
           const hex = hex_str[i] + hex_str[++i]
-          buffer.write(parseInt(hex, 16))
+          buffer.write_byte(parseInt(hex, 16))
           yield
         }
         return buffer
@@ -147,12 +160,12 @@ export namespace PROTO {
   export const Int8: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 1
-      stream.write(...globalThis.Array(length).fill(0))
+      stream.write_bytes(new Uint8Array(length))
       stream.data_view.setInt8(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getInt8(stream.front)
-      stream.read(1)
+      stream.read_bytes(1)
       return value
     }
   }
@@ -160,12 +173,12 @@ export namespace PROTO {
   export const Int16: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 2
-      stream.write(...globalThis.Array(length).fill(0))
+      stream.write_bytes(new Uint8Array(length))
       stream.data_view.setInt16(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getInt16(stream.front)
-      stream.read(2)
+      stream.read_bytes(2)
       return value
     }
   }
@@ -173,12 +186,12 @@ export namespace PROTO {
   export const Int32: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 4
-      stream.write(...globalThis.Array(length).fill(0))
+      stream.write_bytes(new Uint8Array(length))
       stream.data_view.setInt32(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getInt32(stream.front)
-      stream.read(4)
+      stream.read_bytes(4)
       return value
     }
   }
@@ -186,12 +199,12 @@ export namespace PROTO {
   export const UInt8: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 1
-      stream.write(...globalThis.Array(length).fill(0))
+      stream.write_bytes(new Uint8Array(length))
       stream.data_view.setUint8(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getUint8(stream.front)
-      stream.read(1)
+      stream.read_bytes(1)
       return value
     }
   }
@@ -199,12 +212,12 @@ export namespace PROTO {
   export const UInt16: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 2
-      stream.write(...globalThis.Array(length).fill(0))
+      stream.write_bytes(new Uint8Array(length))
       stream.data_view.setUint16(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getUint16(stream.front)
-      stream.read(2)
+      stream.read_bytes(2)
       return value
     }
   }
@@ -212,12 +225,12 @@ export namespace PROTO {
   export const UInt32: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 4
-      stream.write(...globalThis.Array(length).fill(0))
+      stream.write_bytes(new Uint8Array(length))
       stream.data_view.setUint32(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getUint32(stream.front)
-      stream.read(4)
+      stream.read_bytes(4)
       return value
     }
   }
@@ -225,18 +238,18 @@ export namespace PROTO {
   export const UVarInt32: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       while (value >= 0x80) {
-        stream.write((value & 0x7f) | 0x80)
+        stream.write_byte((value & 0x7f) | 0x80)
         value >>= 7
         yield
       }
-      stream.write(value)
+      stream.write_byte(value)
     },
     *deserialize(stream) {
       let value = 0
       let size = 0
       let byte
       do {
-        byte = stream.read()[0]
+        byte = stream.read_byte()
         value |= (byte & 0x7f) << (size * 7)
         size += 1
         yield
@@ -248,12 +261,12 @@ export namespace PROTO {
   export const Float32: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 4
-      stream.write(...globalThis.Array(length).fill(0))
+      stream.write_bytes(new Uint8Array(length))
       stream.data_view.setFloat32(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getFloat32(stream.front)
-      stream.read(4)
+      stream.read_bytes(4)
       return value
     }
   }
@@ -261,12 +274,12 @@ export namespace PROTO {
   export const Float64: PROTO.Serializable<number> = {
     *serialize(value, stream) {
       const length = 8
-      stream.write(...globalThis.Array(length).fill(0))
+      stream.write_bytes(new Uint8Array(length))
       stream.data_view.setFloat64(stream.end - length, value)
     },
     *deserialize(stream) {
       const value = stream.data_view.getFloat64(stream.front)
-      stream.read(8)
+      stream.read_bytes(8)
       return value
     }
   }
@@ -292,10 +305,10 @@ export namespace PROTO {
 
   export const Boolean: PROTO.Serializable<boolean> = {
     *serialize(value, stream) {
-      stream.write(value ? 1 : 0)
+      stream.write_byte(value ? 1 : 0)
     },
     *deserialize(stream) {
-      const value = stream.read()[0]!
+      const value = stream.read_byte()
       return value === 1
     }
   }
@@ -303,11 +316,11 @@ export namespace PROTO {
   export const UInt8Array: PROTO.Serializable<Uint8Array> = {
     *serialize(value: Uint8Array, stream: Buffer) {
       yield* PROTO.UVarInt32.serialize(value.length, stream)
-      stream.write(...value)
+      stream.write_bytes(value)
     },
     *deserialize(stream: Buffer) {
       const length = yield* PROTO.UVarInt32.deserialize(stream)
-      return new Uint8Array(stream.read(length))
+      return stream.read_bytes(length)
     }
   }
   export const Date: PROTO.Serializable<Date> = {
@@ -497,11 +510,11 @@ export namespace NET {
         if (char_code <= 0xff) {
           const hex = str[j] + str[++j]
           const hex_code = parseInt(hex, 16)
-          buffer.write(hex_code & 0xff)
-          buffer.write(hex_code >> 8)
+          buffer.write_byte(hex_code & 0xff)
+          buffer.write_byte(hex_code >> 8)
         } else {
-          buffer.write(char_code & 0xff)
-          buffer.write(char_code >> 8)
+          buffer.write_byte(char_code & 0xff)
+          buffer.write_byte(char_code >> 8)
         }
         yield
       }
