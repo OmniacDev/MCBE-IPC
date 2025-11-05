@@ -31,6 +31,8 @@ export namespace PROTO {
     deserialize(stream: Buffer): Generator<void, T, void>
   }
 
+  export type Infer<S> = S extends PROTO.Serializable<infer T> ? T : never
+
   export class Buffer {
     private _buffer: Uint8Array
     private _data_view: DataView
@@ -573,10 +575,10 @@ export namespace NET {
     ).toUpperCase()
   }
 
-  export function* emit<S extends PROTO.Serializable<T>, T>(
+  export function* emit<S extends PROTO.Serializable<any>>(
     endpoint: string,
-    serializer: S & PROTO.Serializable<T>,
-    value: T
+    serializer: S,
+    value: PROTO.Infer<S>
   ): Generator<void, void, void> {
     const guid = generate_id()
 
@@ -599,10 +601,10 @@ export namespace NET {
     }
   }
 
-  export function listen<T, S extends PROTO.Serializable<T>>(
+  export function listen<S extends PROTO.Serializable<any>>(
     endpoint: string,
-    serializer: S & PROTO.Serializable<T>,
-    callback: (value: T) => Generator<void, void, void>
+    serializer: S,
+    callback: (value: PROTO.Infer<S>) => Generator<void, void, void>
   ) {
     const buffer = new Map<string, { size: number; serialized_packets: string[]; data_size: number }>()
     const listener: Listener = function* (
@@ -635,21 +637,17 @@ export namespace NET {
 
 export namespace IPC {
   /** Sends a message with `args` to `channel` */
-  export function send<S extends PROTO.Serializable<T>, T>(
-    channel: string,
-    serializer: S & PROTO.Serializable<T>,
-    value: T
-  ): void {
+  export function send<S extends PROTO.Serializable<any>>(channel: string, serializer: S, value: PROTO.Infer<S>): void {
     system.runJob(NET.emit(`ipc:${channel}:send`, serializer, value))
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke<TS extends PROTO.Serializable<T>, T, RS extends PROTO.Serializable<R>, R>(
+  export function invoke<S extends PROTO.Serializable<any>, D extends PROTO.Serializable<any>>(
     channel: string,
-    serializer: TS & PROTO.Serializable<T>,
-    value: T,
-    deserializer: RS & PROTO.Serializable<R>
-  ): Promise<R> {
+    serializer: S,
+    value: PROTO.Infer<S>,
+    deserializer: S
+  ): Promise<PROTO.Infer<D>> {
     system.runJob(NET.emit(`ipc:${channel}:invoke`, serializer, value))
     return new Promise(resolve => {
       const terminate = NET.listen(`ipc:${channel}:handle`, deserializer, function* (value) {
@@ -660,10 +658,10 @@ export namespace IPC {
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<S extends PROTO.Serializable<T>, T>(
+  export function on<D extends PROTO.Serializable<any>>(
     channel: string,
-    deserializer: S & PROTO.Serializable<T>,
-    listener: (value: T) => void
+    deserializer: D,
+    listener: (value: PROTO.Infer<D>) => void
   ): () => void {
     return NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
       listener(value)
@@ -671,10 +669,10 @@ export namespace IPC {
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<S extends PROTO.Serializable<T>, T>(
+  export function once<D extends PROTO.Serializable<any>>(
     channel: string,
-    deserializer: S & PROTO.Serializable<T>,
-    listener: (value: T) => void
+    deserializer: D,
+    listener: (value: PROTO.Infer<D>) => void
   ) {
     const terminate = NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
       listener(value)
@@ -684,11 +682,11 @@ export namespace IPC {
   }
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle<TS extends PROTO.Serializable<T>, T, RS extends PROTO.Serializable<R>, R>(
+  export function handle<D extends PROTO.Serializable<any>, S extends PROTO.Serializable<any>>(
     channel: string,
-    deserializer: TS & PROTO.Serializable<T>,
-    serializer: RS & PROTO.Serializable<R>,
-    listener: (value: T) => R
+    deserializer: D,
+    serializer: S,
+    listener: (value: PROTO.Infer<D>) => PROTO.Infer<S>
   ): () => void {
     return NET.listen(`ipc:${channel}:invoke`, deserializer, function* (value) {
       const result = listener(value)
