@@ -239,24 +239,34 @@ export namespace PROTO {
 
   export const UVarInt32: PROTO.Serializable<number> = {
     *serialize(value, stream) {
+      value >>>= 0
       while (value >= 0x80) {
         stream.write_byte((value & 0x7f) | 0x80)
-        value >>= 7
+        value >>>= 7
         yield
       }
       stream.write_byte(value)
     },
     *deserialize(stream) {
       let value = 0
-      let size = 0
-      let byte
-      do {
-        byte = stream.read_byte()
+      for (let size = 0; size < 5; size++) {
+        const byte = stream.read_byte()
         value |= (byte & 0x7f) << (size * 7)
-        size += 1
         yield
-      } while ((byte & 0x80) !== 0 && size < 10)
-      return value
+        if ((byte & 0x80) == 0) break
+      }
+      return value >>> 0
+    }
+  }
+  
+  export const VarInt32: PROTO.Serializable<number> = {
+    *serialize(value, stream) {
+      const zigzag = (value << 1) ^ (value >> 31)
+      yield* PROTO.UVarInt32.serialize(zigzag, stream)
+    },
+    *deserialize(stream) {
+      const zigzag = yield* PROTO.UVarInt32.deserialize(stream)
+      return (zigzag >>> 1) ^ -(zigzag & 1)
     }
   }
 
