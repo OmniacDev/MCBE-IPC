@@ -656,7 +656,7 @@ export namespace IPC {
     channel: string,
     serializer: S,
     value: PROTO.Infer<S>,
-    deserializer: S
+    deserializer: D
   ): Promise<PROTO.Infer<D>> {
     system.runJob(NET.emit(`ipc:${channel}:invoke`, serializer, value))
     return new Promise(resolve => {
