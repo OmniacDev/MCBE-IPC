@@ -513,20 +513,27 @@ export namespace NET {
   system.afterEvents.scriptEventReceive.subscribe(event => {
     system.runJob(
       (function* () {
+        if (event.sourceType !== ScriptEventSource.Server) return
+        
         const [serialized_endpoint, serialized_header] = event.id.split(':')
 
         const endpoint_stream: PROTO.Buffer = yield* PROTO.MIPS.deserialize(serialized_endpoint)
-
         const endpoint: PROTO.Endpoint = yield* PROTO.Endpoint.deserialize(endpoint_stream)
 
         const listeners = ENDPOINTS.get(endpoint)
-        if (event.sourceType === ScriptEventSource.Server && listeners) {
+        if (listeners !== undefined) {
           const header_stream: PROTO.Buffer = yield* PROTO.MIPS.deserialize(serialized_header)
-
           const header: PROTO.Header = yield* PROTO.Header.deserialize(header_stream)
+          
+          const errors = []
           for (let i = 0; i < listeners.length; i++) {
-            yield* listeners[i](header, event.message)
+            try {
+              yield* listeners[i](header, event.message)
+            } catch (e) {
+              errors.push(e)
+            }
           }
+          if (errors.length > 0) throw new AggregateError(errors, "one or more listeners failed")
         }
       })()
     )
