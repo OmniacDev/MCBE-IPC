@@ -67,14 +67,14 @@ export namespace PROTO {
     }
 
     consume(amount: number): number {
-      if (amount > this._length) throw new Error('not enough bytes');
+      if (amount > this._length) throw new Error('not enough bytes')
 
       const front = this.front
       this._length -= amount
       this._offset += amount
       return front
     }
-    
+
     write(byte: number): void
     write(bytes: Uint8Array): void
     write(input: number | Uint8Array): void {
@@ -86,7 +86,7 @@ export namespace PROTO {
         this._buffer.set(input, offset)
       }
     }
-    
+
     read(): number
     read(amount: number): Uint8Array
     read(amount?: number): number | Uint8Array {
@@ -245,7 +245,7 @@ export namespace PROTO {
       return value >>> 0
     }
   }
-  
+
   export const VarInt32: PROTO.Serializable<number> = {
     *serialize(value: number, stream: Buffer) {
       const zigzag = (value << 1) ^ (value >> 31)
@@ -358,9 +358,7 @@ export namespace PROTO {
     }
   }
 
-  export function Tuple<T extends any[]>(
-    ...s: { [K in keyof T]: PROTO.Serializable<T[K]> }
-  ): PROTO.Serializable<T> {
+  export function Tuple<T extends any[]>(...s: { [K in keyof T]: PROTO.Serializable<T[K]> }): PROTO.Serializable<T> {
     return {
       *serialize(value: T, stream: Buffer): Generator<void, void, void> {
         for (let i = 0; i < s.length; i++) {
@@ -514,7 +512,7 @@ export namespace NET {
     system.runJob(
       (function* () {
         if (event.sourceType !== ScriptEventSource.Server) return
-        
+
         const [serialized_endpoint, serialized_header] = event.id.split(':')
 
         const endpoint_stream: PROTO.Buffer = yield* PROTO.MIPS.deserialize(serialized_endpoint)
@@ -524,7 +522,7 @@ export namespace NET {
         if (listeners !== undefined) {
           const header_stream: PROTO.Buffer = yield* PROTO.MIPS.deserialize(serialized_header)
           const header: PROTO.Header = yield* PROTO.Header.deserialize(header_stream)
-          
+
           const errors = []
           for (let i = 0; i < listeners.length; i++) {
             try {
@@ -533,7 +531,7 @@ export namespace NET {
               errors.push(e)
             }
           }
-          if (errors.length > 0) throw new AggregateError(errors, "one or more listeners failed")
+          if (errors.length > 0) throw new AggregateError(errors, 'one or more listeners failed')
         }
       })()
     )
