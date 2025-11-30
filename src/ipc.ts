@@ -58,34 +58,45 @@ export namespace PROTO {
       this._offset = 0
     }
 
-    write_byte(byte: number): void {
-      this.ensure_capacity(1)
-      this._buffer[this.end] = byte
-      this._length++
+    reserve(amount: number): number {
+      this.ensure_capacity(amount)
+
+      const end = this.end
+      this._length += amount
+      return end
     }
 
-    write_bytes(bytes: Uint8Array): void {
-      this.ensure_capacity(bytes.length)
-      this._buffer.set(bytes, this.end)
-      this._length += bytes.length
-    }
+    consume(amount: number): number {
+      if (amount > this._length) throw new Error('not enough bytes');
 
-    read_byte(): number {
-      const byte = this._buffer[this._offset]
-      this._length--
-      this._offset++
-      return byte
+      const front = this.front
+      this._length -= amount
+      this._offset += amount
+      return front
     }
-
-    read_bytes(amount: number): Uint8Array {
-      if (this._length > 0) {
-        const max_amount = amount > this._length ? this._length : amount
-        const values = this._buffer.slice(this._offset, this._offset + max_amount)
-        this._length -= max_amount
-        this._offset += max_amount
-        return values
+    
+    write(byte: number): void
+    write(bytes: Uint8Array): void
+    write(input: number | Uint8Array): void {
+      if (typeof input === 'number') {
+        const offset = this.reserve(1)
+        this._buffer[offset] = input
+      } else {
+        const offset = this.reserve(input.length)
+        this._buffer.set(input, offset)
       }
-      return new Uint8Array()
+    }
+    
+    read(): number
+    read(amount: number): Uint8Array
+    read(amount?: number): number | Uint8Array {
+      if (amount === undefined) {
+        const offset = this.consume(1)
+        return this._buffer[offset]
+      } else {
+        const offset = this.consume(amount)
+        return this._buffer.slice(offset, offset + amount)
+      }
     }
 
     ensure_capacity(size: number) {
@@ -131,7 +142,7 @@ export namespace PROTO {
         const hex_str = str.slice(3, str.length - 1)
         for (let i = 0; i < hex_str.length; i++) {
           const hex = hex_str[i] + hex_str[++i]
-          buffer.write_byte(parseInt(hex, 16))
+          buffer.write(parseInt(hex, 16))
           yield
         }
         return buffer
@@ -160,97 +171,73 @@ export namespace PROTO {
   }
 
   export const Int8: PROTO.Serializable<number> = {
-    *serialize(value, stream) {
-      const length = 1
-      stream.write_bytes(new Uint8Array(length))
-      stream.data_view.setInt8(stream.end - length, value)
+    *serialize(value: number, stream: Buffer) {
+      stream.data_view.setInt8(stream.reserve(1), value)
     },
-    *deserialize(stream) {
-      const value = stream.data_view.getInt8(stream.front)
-      stream.read_bytes(1)
-      return value
+    *deserialize(stream: Buffer): Generator<void, number, void> {
+      return stream.data_view.getInt8(stream.consume(1))
     }
   }
 
   export const Int16: PROTO.Serializable<number> = {
-    *serialize(value, stream) {
-      const length = 2
-      stream.write_bytes(new Uint8Array(length))
-      stream.data_view.setInt16(stream.end - length, value)
+    *serialize(value: number, stream: Buffer) {
+      stream.data_view.setInt16(stream.reserve(2), value)
     },
-    *deserialize(stream) {
-      const value = stream.data_view.getInt16(stream.front)
-      stream.read_bytes(2)
-      return value
+    *deserialize(stream: Buffer): Generator<void, number, void> {
+      return stream.data_view.getInt16(stream.consume(2))
     }
   }
 
   export const Int32: PROTO.Serializable<number> = {
-    *serialize(value, stream) {
-      const length = 4
-      stream.write_bytes(new Uint8Array(length))
-      stream.data_view.setInt32(stream.end - length, value)
+    *serialize(value: number, stream: Buffer) {
+      stream.data_view.setInt32(stream.reserve(4), value)
     },
-    *deserialize(stream) {
-      const value = stream.data_view.getInt32(stream.front)
-      stream.read_bytes(4)
-      return value
+    *deserialize(stream: Buffer): Generator<void, number, void> {
+      return stream.data_view.getInt32(stream.consume(4))
     }
   }
 
   export const UInt8: PROTO.Serializable<number> = {
-    *serialize(value, stream) {
-      const length = 1
-      stream.write_bytes(new Uint8Array(length))
-      stream.data_view.setUint8(stream.end - length, value)
+    *serialize(value: number, stream: Buffer) {
+      stream.data_view.setUint8(stream.reserve(1), value)
     },
-    *deserialize(stream) {
-      const value = stream.data_view.getUint8(stream.front)
-      stream.read_bytes(1)
-      return value
+    *deserialize(stream: Buffer): Generator<void, number, void> {
+      return stream.data_view.getUint8(stream.consume(1))
     }
   }
 
   export const UInt16: PROTO.Serializable<number> = {
-    *serialize(value, stream) {
-      const length = 2
-      stream.write_bytes(new Uint8Array(length))
-      stream.data_view.setUint16(stream.end - length, value)
+    *serialize(value: number, stream: Buffer) {
+      stream.data_view.setUint16(stream.reserve(2), value)
     },
-    *deserialize(stream) {
-      const value = stream.data_view.getUint16(stream.front)
-      stream.read_bytes(2)
-      return value
+    *deserialize(stream: Buffer): Generator<void, number, void> {
+      return stream.data_view.getUint16(stream.consume(2))
     }
   }
 
   export const UInt32: PROTO.Serializable<number> = {
-    *serialize(value, stream) {
-      const length = 4
-      stream.write_bytes(new Uint8Array(length))
-      stream.data_view.setUint32(stream.end - length, value)
+    *serialize(value: number, stream: Buffer) {
+      stream.data_view.setUint32(stream.reserve(4), value)
     },
-    *deserialize(stream) {
-      const value = stream.data_view.getUint32(stream.front)
-      stream.read_bytes(4)
-      return value
+    *deserialize(stream: Buffer): Generator<void, number, void> {
+      return stream.data_view.getUint32(stream.consume(4))
     }
   }
 
   export const UVarInt32: PROTO.Serializable<number> = {
-    *serialize(value, stream) {
+    *serialize(value: number, stream: Buffer) {
       value >>>= 0
       while (value >= 0x80) {
-        stream.write_byte((value & 0x7f) | 0x80)
+        stream.write((value & 0x7f) | 0x80)
         value >>>= 7
         yield
       }
-      stream.write_byte(value)
+      stream.write(value)
     },
-    *deserialize(stream) {
+    *deserialize(stream: Buffer): Generator<void, number, void> {
       let value = 0
       for (let size = 0; size < 5; size++) {
-        const byte = stream.read_byte()
+        const byte = stream.read()
         value |= (byte & 0x7f) << (size * 7)
         yield
         if ((byte & 0x80) == 0) break
@@ -260,51 +247,43 @@ export namespace PROTO {
   }
   
   export const VarInt32: PROTO.Serializable<number> = {
-    *serialize(value, stream) {
+    *serialize(value: number, stream: Buffer) {
       const zigzag = (value << 1) ^ (value >> 31)
       yield* PROTO.UVarInt32.serialize(zigzag, stream)
     },
-    *deserialize(stream) {
+    *deserialize(stream: Buffer): Generator<void, number, void> {
       const zigzag = yield* PROTO.UVarInt32.deserialize(stream)
       return (zigzag >>> 1) ^ -(zigzag & 1)
     }
   }
 
   export const Float32: PROTO.Serializable<number> = {
-    *serialize(value, stream) {
-      const length = 4
-      stream.write_bytes(new Uint8Array(length))
-      stream.data_view.setFloat32(stream.end - length, value)
+    *serialize(value: number, stream: Buffer): Generator<void, void, void> {
+      stream.data_view.setFloat32(stream.reserve(4), value)
     },
-    *deserialize(stream) {
-      const value = stream.data_view.getFloat32(stream.front)
-      stream.read_bytes(4)
-      return value
+    *deserialize(stream: Buffer): Generator<void, number, void> {
+      return stream.data_view.getFloat32(stream.consume(4))
     }
   }
 
   export const Float64: PROTO.Serializable<number> = {
-    *serialize(value, stream) {
-      const length = 8
-      stream.write_bytes(new Uint8Array(length))
-      stream.data_view.setFloat64(stream.end - length, value)
+    *serialize(value: number, stream: Buffer): Generator<void, void, void> {
+      stream.data_view.setFloat64(stream.reserve(8), value)
     },
-    *deserialize(stream) {
-      const value = stream.data_view.getFloat64(stream.front)
-      stream.read_bytes(8)
-      return value
+    *deserialize(stream: Buffer): Generator<void, number, void> {
+      return stream.data_view.getFloat64(stream.consume(8))
     }
   }
 
   export const String: PROTO.Serializable<string> = {
-    *serialize(value, stream) {
+    *serialize(value: string, stream: Buffer): Generator<void, void, void> {
       yield* PROTO.UVarInt32.serialize(value.length, stream)
       for (let i = 0; i < value.length; i++) {
         const code = value.charCodeAt(i)
         yield* PROTO.UVarInt32.serialize(code, stream)
       }
     },
-    *deserialize(stream) {
+    *deserialize(stream: Buffer): Generator<void, string, void> {
       const length = yield* PROTO.UVarInt32.deserialize(stream)
       let value = ''
       for (let i = 0; i < length; i++) {
@@ -316,64 +295,63 @@ export namespace PROTO {
   }
 
   export const Boolean: PROTO.Serializable<boolean> = {
-    *serialize(value, stream) {
-      stream.write_byte(value ? 1 : 0)
+    *serialize(value: boolean, stream: Buffer): Generator<void, void, void> {
+      stream.write(value ? 1 : 0)
     },
-    *deserialize(stream) {
-      const value = stream.read_byte()
-      return value === 1
+    *deserialize(stream: Buffer): Generator<void, boolean, void> {
+      return stream.read() !== 0
     }
   }
 
   export const UInt8Array: PROTO.Serializable<Uint8Array> = {
-    *serialize(value: Uint8Array, stream: Buffer) {
+    *serialize(value: Uint8Array, stream: Buffer): Generator<void, void, void> {
       yield* PROTO.UVarInt32.serialize(value.length, stream)
-      stream.write_bytes(value)
+      stream.write(value)
     },
-    *deserialize(stream: Buffer) {
+    *deserialize(stream: Buffer): Generator<void, Uint8Array, void> {
       const length = yield* PROTO.UVarInt32.deserialize(stream)
-      return stream.read_bytes(length)
+      return stream.read(length)
     }
   }
   export const Date: PROTO.Serializable<Date> = {
-    *serialize(value: Date, stream: Buffer) {
+    *serialize(value: Date, stream: Buffer): Generator<void, void, void> {
       yield* PROTO.Float64.serialize(value.getTime(), stream)
     },
-    *deserialize(stream: Buffer) {
+    *deserialize(stream: Buffer): Generator<void, Date, void> {
       return new globalThis.Date(yield* PROTO.Float64.deserialize(stream))
     }
   }
 
-  export function Object<T extends object>(obj: { [K in keyof T]: PROTO.Serializable<T[K]> }): PROTO.Serializable<T> {
+  export function Object<T extends object>(s: { [K in keyof T]: PROTO.Serializable<T[K]> }): PROTO.Serializable<T> {
     return {
-      *serialize(value, stream) {
-        for (const key in obj) {
-          yield* obj[key].serialize(value[key], stream)
+      *serialize(value: T, stream: Buffer): Generator<void, void, void> {
+        for (const key in s) {
+          yield* s[key].serialize(value[key], stream)
         }
       },
-      *deserialize(stream) {
+      *deserialize(stream: Buffer): Generator<void, T, void> {
         const result: Partial<T> = {}
-        for (const key in obj) {
-          result[key] = yield* obj[key].deserialize(stream)
+        for (const key in s) {
+          result[key] = yield* s[key].deserialize(stream)
         }
         return result as T
       }
     }
   }
 
-  export function Array<T>(value: PROTO.Serializable<T>): PROTO.Serializable<T[]> {
+  export function Array<T>(s: PROTO.Serializable<T>): PROTO.Serializable<T[]> {
     return {
-      *serialize(array, stream) {
-        yield* PROTO.UVarInt32.serialize(array.length, stream)
-        for (const item of array) {
-          yield* value.serialize(item, stream)
+      *serialize(value: T[], stream: Buffer): Generator<void, void, void> {
+        yield* PROTO.UVarInt32.serialize(value.length, stream)
+        for (const item of value) {
+          yield* s.serialize(item, stream)
         }
       },
-      *deserialize(stream) {
+      *deserialize(stream: Buffer): Generator<void, T[], void> {
         const result: T[] = []
         const length = yield* PROTO.UVarInt32.deserialize(stream)
         for (let i = 0; i < length; i++) {
-          result[i] = yield* value.deserialize(stream)
+          result[i] = yield* s.deserialize(stream)
         }
         return result
       }
@@ -381,57 +359,54 @@ export namespace PROTO {
   }
 
   export function Tuple<T extends any[]>(
-    ...values: { [K in keyof T]: PROTO.Serializable<T[K]> }
+    ...s: { [K in keyof T]: PROTO.Serializable<T[K]> }
   ): PROTO.Serializable<T> {
     return {
-      *serialize(tuple, stream) {
-        for (let i = 0; i < values.length; i++) {
-          yield* values[i].serialize(tuple[i], stream)
+      *serialize(value: T, stream: Buffer): Generator<void, void, void> {
+        for (let i = 0; i < s.length; i++) {
+          yield* s[i].serialize(value[i], stream)
         }
       },
-      *deserialize(stream) {
+      *deserialize(stream: Buffer): Generator<void, T, void> {
         const result: any[] = []
-        for (let i = 0; i < values.length; i++) {
-          result[i] = yield* values[i].deserialize(stream)
+        for (let i = 0; i < s.length; i++) {
+          result[i] = yield* s[i].deserialize(stream)
         }
         return result as T
       }
     }
   }
 
-  export function Optional<T>(value: PROTO.Serializable<T>): PROTO.Serializable<T | undefined> {
+  export function Optional<T>(s: PROTO.Serializable<T>): PROTO.Serializable<T | undefined> {
     return {
-      *serialize(optional, stream) {
-        yield* PROTO.Boolean.serialize(optional !== undefined, stream)
-        if (optional !== undefined) {
-          yield* value.serialize(optional, stream)
-        }
+      *serialize(value: T | undefined, stream: Buffer): Generator<void, void, void> {
+        const def = value !== undefined
+        yield* PROTO.Boolean.serialize(def, stream)
+        if (def) yield* s.serialize(value, stream)
       },
-      *deserialize(stream) {
-        const defined = yield* PROTO.Boolean.deserialize(stream)
-        if (defined) {
-          return yield* value.deserialize(stream)
-        }
+      *deserialize(stream: Buffer): Generator<void, T | undefined, void> {
+        const def = yield* PROTO.Boolean.deserialize(stream)
+        if (def) return yield* s.deserialize(stream)
         return undefined
       }
     }
   }
 
-  export function Map<K, V>(key: PROTO.Serializable<K>, value: PROTO.Serializable<V>): PROTO.Serializable<Map<K, V>> {
+  export function Map<K, V>(kS: PROTO.Serializable<K>, vS: PROTO.Serializable<V>): PROTO.Serializable<Map<K, V>> {
     return {
-      *serialize(map, stream) {
-        yield* PROTO.UVarInt32.serialize(map.size, stream)
-        for (const [k, v] of map.entries()) {
-          yield* key.serialize(k, stream)
-          yield* value.serialize(v, stream)
+      *serialize(value: Map<K, V>, stream: Buffer): Generator<void, void, void> {
+        yield* PROTO.UVarInt32.serialize(value.size, stream)
+        for (const [k, v] of value) {
+          yield* kS.serialize(k, stream)
+          yield* vS.serialize(v, stream)
         }
       },
-      *deserialize(stream) {
+      *deserialize(stream: Buffer): Generator<void, Map<K, V>, void> {
         const size = yield* PROTO.UVarInt32.deserialize(stream)
         const result = new globalThis.Map<K, V>()
         for (let i = 0; i < size; i++) {
-          const k = yield* key.deserialize(stream)
-          const v = yield* value.deserialize(stream)
+          const k = yield* kS.deserialize(stream)
+          const v = yield* vS.deserialize(stream)
           result.set(k, v)
         }
         return result
@@ -439,19 +414,19 @@ export namespace PROTO {
     }
   }
 
-  export function Set<V>(value: PROTO.Serializable<V>): PROTO.Serializable<Set<V>> {
+  export function Set<V>(s: PROTO.Serializable<V>): PROTO.Serializable<Set<V>> {
     return {
-      *serialize(set, stream) {
+      *serialize(set: Set<V>, stream: Buffer): Generator<void, void, void> {
         yield* PROTO.UVarInt32.serialize(set.size, stream)
-        for (const [_, v] of set.entries()) {
-          yield* value.serialize(v, stream)
+        for (const v of set) {
+          yield* s.serialize(v, stream)
         }
       },
-      *deserialize(stream) {
+      *deserialize(stream: Buffer): Generator<void, Set<V>, void> {
         const size = yield* PROTO.UVarInt32.deserialize(stream)
         const result = new globalThis.Set<V>()
         for (let i = 0; i < size; i++) {
-          const v = yield* value.deserialize(stream)
+          const v = yield* s.deserialize(stream)
           result.add(v)
         }
         return result
@@ -522,11 +497,11 @@ export namespace NET {
         if (char_code <= 0xff) {
           const hex = str[j] + str[++j]
           const hex_code = parseInt(hex, 16)
-          buffer.write_byte(hex_code & 0xff)
-          buffer.write_byte(hex_code >> 8)
+          buffer.write(hex_code & 0xff)
+          buffer.write(hex_code >> 8)
         } else {
-          buffer.write_byte(char_code & 0xff)
-          buffer.write_byte(char_code >> 8)
+          buffer.write(char_code & 0xff)
+          buffer.write(char_code >> 8)
         }
         yield
       }
