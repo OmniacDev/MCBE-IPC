@@ -638,12 +638,12 @@ export namespace IPC {
     value: PROTO.Infer<S>,
     deserializer: D
   ): Promise<PROTO.Infer<D>> {
-    system.runJob(NET.emit(`ipc:${channel}:invoke`, serializer, value))
     return new Promise(resolve => {
       const terminate = NET.listen(`ipc:${channel}:handle`, deserializer, function* (value) {
         resolve(value)
         terminate()
       })
+      system.runJob(NET.emit(`ipc:${channel}:invoke`, serializer, value))
     })
   }
 
