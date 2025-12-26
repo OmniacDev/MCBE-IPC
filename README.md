@@ -23,11 +23,12 @@ npm install mcbe-ipc
 
 
 
+
 > [!NOTE]
 > Official documentation is still in progress.
 > 
 > For now, you can refer to the [DeepWiki page](https://deepwiki.com/OmniacDev/MCBE-IPC/).
-> Please note that this is not official documentation. While it is generally accurate, some of the more advanced sections may contain small inaccuracies.
+> Please note that while it is generally accurate, some of the more advanced sections may contain small inaccuracies.
 
 
 
