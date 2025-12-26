@@ -20,12 +20,15 @@
   ],
   "scripts": {
     "build": "tsc",
+    "test": "vitest",
+    "bench": "vitest bench",
     "format": "prettier --write src",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "prettier": "^3.3.3",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^4.0.16"
   },
   "dependencies": {
     "@minecraft/server": "^1.18.0"
