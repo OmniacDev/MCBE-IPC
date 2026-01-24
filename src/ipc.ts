@@ -26,12 +26,23 @@
 import { ScriptEventSource, system } from '@minecraft/server'
 
 export namespace PROTO {
-  export interface Serializable<T> {
+  declare const t: unique symbol
+
+  interface Phantom<T> {
+    readonly [t]?: T
+  }
+
+  export interface Serializer<T> extends Phantom<T> {
     serialize(value: T, stream: Buffer): Generator<void, void, void>
+  }
+
+  export interface Deserializer<T> extends Phantom<T> {
     deserialize(stream: Buffer): Generator<void, T, void>
   }
 
-  export type Infer<S> = S extends PROTO.Serializable<infer T> ? T : never
+  export interface Serializable<T> extends Serializer<T>, Deserializer<T> {}
+
+  export type Infer<S> = S extends Phantom<infer T> ? T : never
 
   export class Buffer {
     private _buffer: Uint8Array
@@ -565,7 +576,7 @@ export namespace NET {
     ).toUpperCase()
   }
 
-  export function* emit<S extends PROTO.Serializable<any>>(
+  export function* emit<S extends PROTO.Serializer<any>>(
     endpoint: string,
     serializer: S,
     value: PROTO.Infer<S>
@@ -591,10 +602,10 @@ export namespace NET {
     }
   }
 
-  export function listen<S extends PROTO.Serializable<any>>(
+  export function listen<D extends PROTO.Deserializer<any>>(
     endpoint: string,
-    serializer: S,
-    callback: (value: PROTO.Infer<S>) => Generator<void, void, void>
+    deserializer: D,
+    callback: (value: PROTO.Infer<D>) => Generator<void, void, void>
   ) {
     const buffer = new Map<string, { size: number; serialized_packets: string[]; data_size: number }>()
     const listener: Listener = function* (
@@ -615,7 +626,7 @@ export namespace NET {
 
       if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
         const stream = yield* deserialize(fragment.serialized_packets)
-        const value = yield* serializer.deserialize(stream)
+        const value = yield* deserializer.deserialize(stream)
         yield* callback(value)
 
         buffer.delete(payload.guid)
@@ -627,12 +638,12 @@ export namespace NET {
 
 export namespace IPC {
   /** Sends a message with `args` to `channel` */
-  export function send<S extends PROTO.Serializable<any>>(channel: string, serializer: S, value: PROTO.Infer<S>): void {
+  export function send<S extends PROTO.Serializer<any>>(channel: string, serializer: S, value: PROTO.Infer<S>): void {
     system.runJob(NET.emit(`ipc:${channel}:send`, serializer, value))
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke<S extends PROTO.Serializable<any>, D extends PROTO.Serializable<any>>(
+  export function invoke<S extends PROTO.Serializer<any>, D extends PROTO.Deserializer<any>>(
     channel: string,
     serializer: S,
     value: PROTO.Infer<S>,
@@ -648,7 +659,7 @@ export namespace IPC {
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<D extends PROTO.Serializable<any>>(
+  export function on<D extends PROTO.Deserializer<any>>(
     channel: string,
     deserializer: D,
     listener: (value: PROTO.Infer<D>) => void
@@ -659,7 +670,7 @@ export namespace IPC {
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<D extends PROTO.Serializable<any>>(
+  export function once<D extends PROTO.Deserializer<any>>(
     channel: string,
     deserializer: D,
     listener: (value: PROTO.Infer<D>) => void
@@ -672,7 +683,7 @@ export namespace IPC {
   }
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle<D extends PROTO.Serializable<any>, S extends PROTO.Serializable<any>>(
+  export function handle<D extends PROTO.Deserializer<any>, S extends PROTO.Serializer<any>>(
     channel: string,
     deserializer: D,
     serializer: S,
