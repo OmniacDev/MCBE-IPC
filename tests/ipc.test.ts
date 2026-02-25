@@ -26,6 +26,27 @@ describe('ipc', () => {
 
     expect(recv).toEqual(value);
   });
+
+  it('invoke-correlation', async () => {
+    const Multiply = PROTO.Object({
+      a: PROTO.Float64,
+      b: PROTO.Float64
+    });
+
+    IPC.handle('multiply', Multiply, PROTO.Float64, args => {
+      return args.a * args.b;
+    });
+
+    const [first, second, third] = await Promise.all([
+      IPC.invoke('multiply', Multiply, { a: 2, b: 3 }, PROTO.Float64),
+      IPC.invoke('multiply', Multiply, { a: 5, b: 4 }, PROTO.Float64),
+      IPC.invoke('multiply', Multiply, { a: 12, b: 7 }, PROTO.Float64)
+    ]);
+
+    expect(first).toEqual(2 * 3);
+    expect(second).toEqual(5 * 4);
+    expect(third).toEqual(12 * 7);
+  });
 });
 
 describe('backwards-compat', () => {
