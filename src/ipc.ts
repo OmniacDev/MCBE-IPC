@@ -457,7 +457,7 @@ export namespace NET {
     final: boolean;
   };
 
-  type Listener = (header: Header, serialized_packet: string) => Generator<void, void, void>;
+  type Listener = (header: Header, fragment: string) => Generator<void, void, void>;
 
   const Endpoint: PROTO.Serializable<Endpoint> = PROTO.String;
 
@@ -545,9 +545,9 @@ export namespace NET {
           const header: Header = yield* Header.deserialize(header_stream);
 
           const errors = [];
-          for (let i = 0; i < listeners.length; i++) {
+          for (const listener of [...listeners]) {
             try {
-              yield* listeners[i](header, event.message);
+              yield* listener(header, event.message);
             } catch (e) {
               errors.push(e);
             }
@@ -613,27 +613,39 @@ export namespace NET {
     }
   }
 
+  export interface ListenOptions {
+    filter?: (meta: Meta) => boolean;
+  }
+
   export function listen<D>(
     endpoint: string,
     deserializer: PROTO.Deserializer<D>,
-    callback: (value: NoInfer<D>, meta: Meta) => Generator<void, void, void>
+    callback: (value: NoInfer<D>, meta: Meta) => Generator<void, void, void>,
+    options?: ListenOptions
   ) {
-    const buffer: Map<string, { size: number; serialized_packets: string[]; data_size: number }> = new Map();
-    const listener: Listener = function* (header: Header, serialized_packet: string): Generator<void, void, void> {
-      let fragment = buffer.get(header.meta.guid);
-      if (!fragment) {
-        fragment = { size: -1, serialized_packets: [], data_size: 0 };
-        buffer.set(header.meta.guid, fragment);
+    const buffer: Map<string, { size: number; fragments: string[]; received: number }> = new Map();
+    const listener: Listener = function* (header: Header, fragment: string): Generator<void, void, void> {
+      let packet = buffer.get(header.meta.guid);
+      if (packet === undefined) {
+        if (options?.filter?.(header.meta) === false) return;
+
+        packet = { size: -1, fragments: [], received: 0 };
+        buffer.set(header.meta.guid, packet);
       }
 
       if (header.final) {
-        fragment.size = header.index + 1;
+        packet.size = header.index + 1;
       }
-      fragment.serialized_packets[header.index] = serialized_packet;
-      fragment.data_size += header.index + 1;
 
-      if (fragment.size !== -1 && fragment.data_size === (fragment.size * (fragment.size + 1)) / 2) {
-        const stream = yield* deserialize(fragment.serialized_packets);
+      if (packet.fragments[header.index] === undefined) {
+        packet.fragments[header.index] = fragment;
+        packet.received++;
+      } else {
+        throw new Error(`received duplicate fragment ${header.index} for packet ${header.meta.guid}`);
+      }
+
+      if (packet.size !== -1 && packet.size === packet.received) {
+        const stream = yield* deserialize(packet.fragments);
         const value = yield* deserializer.deserialize(stream);
         yield* callback(value, header.meta);
 
@@ -660,12 +672,19 @@ export namespace IPC {
     const id = UTIL.generate_id();
 
     return new Promise(resolve => {
-      const terminate = NET.listen(`ipc:${channel}:handle`, deserializer, function* (value, meta) {
-        if (meta.signature.includes(`+correlation`) && meta.guid !== id) return;
+      const terminate = NET.listen(
+        `ipc:${channel}:handle`,
+        deserializer,
+        function* (value, meta) {
+          if (meta.signature.includes(`+correlation`) && meta.guid !== id) return;
 
-        resolve(value);
-        terminate();
-      });
+          resolve(value);
+          terminate();
+        },
+        {
+          filter: meta => !meta.signature.includes(`+correlation`) || meta.guid === id
+        }
+      );
       system.runJob(
         NET.emit(`ipc:${channel}:invoke`, serializer, value, {
           metaOverride: {
