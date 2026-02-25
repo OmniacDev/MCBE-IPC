@@ -33,23 +33,15 @@ namespace UTIL {
 }
 
 export namespace PROTO {
-  declare const t: unique symbol;
-
-  interface Phantom<T> {
-    readonly [t]?: T;
-  }
-
-  export interface Serializer<T> extends Phantom<T> {
+  export interface Serializer<T> {
     serialize(value: T, stream: Buffer): Generator<void, void, void>;
   }
 
-  export interface Deserializer<T> extends Phantom<T> {
+  export interface Deserializer<T> {
     deserialize(stream: Buffer): Generator<void, T, void>;
   }
 
   export interface Serializable<T> extends Serializer<T>, Deserializer<T> {}
-
-  export type Infer<S> = S extends Phantom<infer T> ? T : never;
 
   export class Buffer {
     private _buffer: Uint8Array;
@@ -588,10 +580,10 @@ export namespace NET {
     metaOverride?: Partial<Meta>;
   }
 
-  export function* emit<S extends PROTO.Serializer<any>>(
+  export function* emit<S>(
     endpoint: string,
-    serializer: S,
-    value: PROTO.Infer<S>,
+    serializer: PROTO.Serializer<S>,
+    value: NoInfer<S>,
     options?: EmitOptions
   ): Generator<void, void, void> {
     const guid = options?.metaOverride?.guid ?? UTIL.generate_id();
@@ -621,10 +613,10 @@ export namespace NET {
     }
   }
 
-  export function listen<D extends PROTO.Deserializer<any>>(
+  export function listen<D>(
     endpoint: string,
-    deserializer: D,
-    callback: (value: PROTO.Infer<D>, meta: Meta) => Generator<void, void, void>
+    deserializer: PROTO.Deserializer<D>,
+    callback: (value: NoInfer<D>, meta: Meta) => Generator<void, void, void>
   ) {
     const buffer: Map<string, { size: number; serialized_packets: string[]; data_size: number }> = new Map();
     const listener: Listener = function* (header: Header, serialized_packet: string): Generator<void, void, void> {
@@ -654,17 +646,17 @@ export namespace NET {
 
 export namespace IPC {
   /** Sends a message with `args` to `channel` */
-  export function send<S extends PROTO.Serializer<any>>(channel: string, serializer: S, value: PROTO.Infer<S>): void {
+  export function send<S>(channel: string, serializer: PROTO.Serializer<S>, value: NoInfer<S>): void {
     system.runJob(NET.emit(`ipc:${channel}:send`, serializer, value));
   }
 
   /** Sends an `invoke` message through IPC, and expects a result asynchronously. */
-  export function invoke<S extends PROTO.Serializer<any>, D extends PROTO.Deserializer<any>>(
+  export function invoke<S, D>(
     channel: string,
-    serializer: S,
-    value: PROTO.Infer<S>,
-    deserializer: D
-  ): Promise<PROTO.Infer<D>> {
+    serializer: PROTO.Serializer<S>,
+    value: NoInfer<S>,
+    deserializer: PROTO.Deserializer<D>
+  ): Promise<NoInfer<D>> {
     const id = UTIL.generate_id();
 
     return new Promise(resolve => {
@@ -686,10 +678,10 @@ export namespace IPC {
   }
 
   /** Listens to `channel`. When a new message arrives, `listener` will be called with `listener(args)`. */
-  export function on<D extends PROTO.Deserializer<any>>(
+  export function on<D>(
     channel: string,
-    deserializer: D,
-    listener: (value: PROTO.Infer<D>) => void
+    deserializer: PROTO.Deserializer<D>,
+    listener: (value: NoInfer<D>) => void
   ): () => void {
     return NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
       listener(value);
@@ -697,11 +689,7 @@ export namespace IPC {
   }
 
   /** Listens to `channel` once. When a new message arrives, `listener` will be called with `listener(args)`, and then removed. */
-  export function once<D extends PROTO.Deserializer<any>>(
-    channel: string,
-    deserializer: D,
-    listener: (value: PROTO.Infer<D>) => void
-  ) {
+  export function once<D>(channel: string, deserializer: PROTO.Deserializer<D>, listener: (value: NoInfer<D>) => void) {
     const terminate = NET.listen(`ipc:${channel}:send`, deserializer, function* (value) {
       listener(value);
       terminate();
@@ -710,27 +698,22 @@ export namespace IPC {
   }
 
   /** Adds a handler for an `invoke` IPC. This handler will be called whenever `invoke(channel, ...args)` is called */
-  export function handle<D extends PROTO.Deserializer<any>, S extends PROTO.Serializer<any>>(
+  export function handle<D, S>(
     channel: string,
-    deserializer: D,
-    serializer: S,
-    listener: (value: PROTO.Infer<D>) => PROTO.Infer<S>
+    deserializer: PROTO.Deserializer<D>,
+    serializer: PROTO.Serializer<S>,
+    listener: (value: NoInfer<D>) => NoInfer<S>
   ): () => void {
     return NET.listen(`ipc:${channel}:invoke`, deserializer, function* (value, meta) {
       const result = listener(value);
-      yield* NET.emit(
-        `ipc:${channel}:handle`,
-        serializer,
-        result,
-        meta.signature.includes(`+correlation`)
+      yield* NET.emit(`ipc:${channel}:handle`, serializer, result, {
+        metaOverride: meta.signature.includes(`+correlation`)
           ? {
-              metaOverride: {
-                guid: meta.guid,
-                signature: `${NET.SIGNATURE}+correlation`
-              }
+              guid: meta.guid,
+              signature: `${NET.SIGNATURE}+correlation`
             }
           : undefined
-      );
+      });
     });
   }
 }
