@@ -27,7 +27,7 @@ npm install mcbe-ipc
 > [!NOTE]
 > Official documentation is still in progress.
 > 
-> For now, you can refer to the [DeepWiki page](https://deepwiki.com/OmniacDev/MCBE-IPC/).
+> For now, you can [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OmniacDev/MCBE-IPC).
 > Please note that while it is generally accurate, some of the more advanced sections may contain small inaccuracies.
 
 
