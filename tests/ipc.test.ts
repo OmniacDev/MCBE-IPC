@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import IPC, { NET, PROTO } from '../src/ipc';
 import { system } from '@minecraft/server';
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('ipc', () => {
   it('should receive the same value', async () => {
@@ -80,5 +84,45 @@ describe('backwards-compat', () => {
     const recv = await IPC.invoke(channel, PROTO.String, value, PROTO.String);
 
     expect(recv).toEqual(value);
+  });
+});
+
+describe('cached', () => {
+  it('use hits instead of re-serializing', () => {
+    const spy = vi.spyOn(PROTO.String, 'serialize');
+
+    const cached = PROTO.Cached(PROTO.String, 4);
+
+    const stream1 = new PROTO.Buffer();
+    system.runJob(cached.serialize('A', stream1)); // miss
+
+    const stream2 = new PROTO.Buffer();
+    system.runJob(cached.serialize('A', stream2)); // hit
+
+    for (let i = 0; i < 10; i++) {
+      const stream3 = new PROTO.Buffer();
+      system.runJob(cached.serialize('A', stream3)); // hit
+    }
+
+    expect(spy).toHaveBeenCalledTimes(1); // missed once
+
+    expect(stream1.to_uint8array()).toEqual(stream2.to_uint8array());
+  });
+
+  it('evict on max depth', () => {
+    const spy = vi.spyOn(PROTO.String, 'serialize');
+    const cached = PROTO.Cached(PROTO.String, 2);
+
+    const s = new PROTO.Buffer();
+
+    system.runJob(cached.serialize('A', s)); // miss, cache becomes [A]
+    system.runJob(cached.serialize('B', s)); // miss, cache becomes [A, B]
+
+    system.runJob(cached.serialize('A', s)); // hit, cache becomes [B, A]
+
+    system.runJob(cached.serialize('C', s)); // miss, cache becomes [A, C]
+    system.runJob(cached.serialize('B', s)); // miss, cache becomes [C, B]
+
+    expect(spy).toHaveBeenCalledTimes(4); // missed 4 times
   });
 });

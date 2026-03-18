@@ -441,6 +441,36 @@ export namespace PROTO {
       }
     };
   }
+
+  export function Cached<V>(s: PROTO.Serializable<V>, depth: number = 16): PROTO.Serializable<V> {
+    const cache = new globalThis.Map<V, Uint8Array>();
+    return {
+      *serialize(value: V, stream: PROTO.Buffer): Generator<void, void, void> {
+        const hit = cache.get(value);
+        if (hit !== undefined) {
+          stream.write(hit);
+
+          cache.delete(value);
+          cache.set(value, hit);
+        } else {
+          const buffer = new PROTO.Buffer();
+          yield* s.serialize(value, buffer);
+          const bytes = buffer.to_uint8array();
+          stream.write(bytes);
+
+          cache.set(value, bytes);
+          if (cache.size > depth) {
+            const first = cache.keys().next().value;
+            cache.delete(first);
+          }
+        }
+      },
+
+      *deserialize(stream: PROTO.Buffer): Generator<void, V, void> {
+        return yield* s.deserialize(stream);
+      }
+    };
+  }
 }
 
 export namespace NET {
