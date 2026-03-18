@@ -102,7 +102,7 @@ describe('cached-benchmark', () => {
   const base = PROTO.String;
   const cached = PROTO.Cached(base, 32);
 
-  const largeString = 'A'.repeat(512);
+  const str = 'Hello World!';
 
   const stream = new PROTO.Buffer();
   stream.write = (_: any) => {
@@ -110,10 +110,10 @@ describe('cached-benchmark', () => {
   };
 
   bench('uncached', () => {
-    system.runJob(base.serialize(largeString, stream));
+    system.runJob(base.serialize(str, stream));
   });
 
   bench('cached', () => {
-    system.runJob(cached.serialize(largeString, stream));
+    system.runJob(cached.serialize(str, stream));
   });
 });
