@@ -134,6 +134,10 @@ export namespace PROTO {
   }
 
   export namespace MIPS {
+    export function is_valid(str: string): boolean {
+      return str.startsWith('(0x') && str.endsWith(')');
+    }
+
     export function* serialize(stream: PROTO.Buffer): Generator<void, string, void> {
       const uint8array = stream.to_uint8array();
 
@@ -147,7 +151,7 @@ export namespace PROTO {
       return str;
     }
     export function* deserialize(str: string): Generator<void, PROTO.Buffer, void> {
-      if (str.startsWith('(0x') && str.endsWith(')')) {
+      if (is_valid(str)) {
         const buffer = new Buffer();
         const hex_str = str.slice(3, str.length - 1);
         for (let i = 0; i < hex_str.length; i++) {
@@ -566,11 +570,13 @@ export namespace NET {
 
         const [serialized_endpoint, serialized_header] = event.id.split(':');
 
+        if (!PROTO.MIPS.is_valid(serialized_endpoint)) return;
+
         const endpoint_stream: PROTO.Buffer = yield* PROTO.MIPS.deserialize(serialized_endpoint);
         const endpoint: Endpoint = yield* Endpoint.deserialize(endpoint_stream);
 
         const listeners = LISTENERS.get(endpoint);
-        if (listeners !== undefined) {
+        if (listeners !== undefined && PROTO.MIPS.is_valid(serialized_header)) {
           const header_stream: PROTO.Buffer = yield* PROTO.MIPS.deserialize(serialized_header);
           const header: Header = yield* Header.deserialize(header_stream);
 

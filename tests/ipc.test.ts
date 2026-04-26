@@ -144,3 +144,23 @@ describe('proto', () => {
     expect(deInt).toEqual(int);
   });
 });
+
+describe('net', () => {
+  it('should ignore non-ipc scriptevent', () => {
+    const spy = vi.spyOn(PROTO.MIPS, 'deserialize');
+
+    NET.listen('', PROTO.Void, function* () {});
+
+    system.sendScriptEvent('not_valid', '');
+
+    expect(spy).toHaveBeenCalledTimes(0);
+
+    system.sendScriptEvent('(0x00):not_valid', '');
+
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    system.sendScriptEvent('(0x00):(0x00000000)', '');
+
+    expect(spy).toHaveBeenCalledTimes(3);
+  });
+});
