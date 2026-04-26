@@ -126,3 +126,21 @@ describe('cached', () => {
     expect(spy).toHaveBeenCalledTimes(4); // missed 4 times
   });
 });
+
+describe('proto', () => {
+  it('varint32 min', () => {
+    const stream = new PROTO.Buffer();
+
+    const int = -(2 ** 31);
+    system.runJob(PROTO.VarInt32.serialize(int, stream));
+
+    let deInt;
+    system.runJob(
+      (function* () {
+        deInt = yield* PROTO.VarInt32.deserialize(stream);
+      })()
+    );
+
+    expect(deInt).toEqual(int);
+  });
+});
