@@ -580,15 +580,13 @@ export namespace NET {
           const header_stream: PROTO.Buffer = yield* PROTO.MIPS.deserialize(serialized_header);
           const header: Header = yield* Header.deserialize(header_stream);
 
-          const errors = [];
           for (const listener of [...listeners]) {
             try {
               yield* listener(header, event.message);
             } catch (e) {
-              errors.push(e);
+              console.error(`[MCBE-IPC] listener error while handling packet on "${endpoint}":`, e);
             }
           }
-          if (errors.length > 0) throw new AggregateError(errors, 'one or more listeners failed');
         }
       })()
     );

@@ -2,7 +2,7 @@
   "compilerOptions": {
     "module": "ES2020",
     "target": "ES2020",
-    "lib": ["ES2021"],
+    "lib": ["ES2021", "DOM"],
     "moduleResolution": "Node",
     "allowSyntheticDefaultImports": true,
     "declaration": true,
