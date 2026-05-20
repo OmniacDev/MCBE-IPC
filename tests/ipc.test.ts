@@ -163,4 +163,44 @@ describe('net', () => {
 
     expect(spy).toHaveBeenCalledTimes(3);
   });
+
+  it('should fragment less than or equal 2048 bytes', () => {
+    const cases = [
+      'A'.repeat(50000),
+      '😀'.repeat(2000),
+      ('A'.repeat(1000) + '😀').repeat(200),
+      '𐐷'.repeat(2000),
+      Array.from({ length: 50000 }, () => String.fromCharCode(Math.random() * 0xffff)).join(''),
+      'A'.repeat(50000),
+      '\u0100'.repeat(20000),
+      '\u4000'.repeat(20000),
+      String.fromCharCode(0x200000).repeat(20000),
+      String.fromCharCode(0x40000000).repeat(20000),
+      '𐐷'.repeat(20000),
+      ['\u007F', '\u0080', '\u4000', String.fromCharCode(0x200000), String.fromCharCode(0x40000000)]
+        .join('')
+        .repeat(5000),
+      Array.from({ length: 50000 }, () => String.fromCharCode(Math.floor(Math.random() * 0xffffffff))).join('')
+    ];
+
+    system.runJob(
+      (function* () {
+        for (const str of cases) {
+          const buf = new PROTO.Buffer();
+          yield* PROTO.String.serialize(str, buf);
+
+          const serialized = yield* NET.serialize(buf, NET.FRAG_MAX);
+          for (const str of serialized) {
+            expect(str.length).toBeLessThanOrEqual(NET.FRAG_MAX);
+
+            const utf8 = new TextEncoder().encode(str);
+            expect(utf8.length).toBeLessThanOrEqual(NET.FRAG_MAX);
+
+            const buf = yield* NET.deserialize([str]);
+            expect(buf.to_uint8array().length).toBeLessThanOrEqual(NET.FRAG_MAX);
+          }
+        }
+      })()
+    );
+  });
 });
