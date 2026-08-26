@@ -465,7 +465,7 @@ export namespace PROTO {
           cache.set(value, bytes);
           if (cache.size > depth) {
             const first = cache.keys().next().value;
-            cache.delete(first);
+            if (first !== undefined) cache.delete(first);
           }
         }
       },
