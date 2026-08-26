@@ -41,7 +41,11 @@ export namespace PROTO {
     deserialize(stream: Buffer): Generator<void, T, void>;
   }
 
-  export interface Serializable<T> extends Serializer<T>, Deserializer<T> {}
+  type Guarded<T, Guard extends boolean> = Guard extends true
+    ? { is(value: unknown): value is NoInfer<T> }
+    : { is?(value: unknown): value is NoInfer<T> };
+
+  export type Serializable<T, Guard extends boolean = false> = Serializer<T> & Deserializer<T> & Guarded<T, Guard>;
 
   export class Buffer {
     private _buffer: Uint8Array;
@@ -165,26 +169,31 @@ export namespace PROTO {
     }
   }
 
-  export const Void: PROTO.Serializable<void> = {
+  export const Void: PROTO.Serializable<void, true> = {
+    is: (value: unknown): value is void => value === undefined,
     *serialize() {},
     *deserialize() {}
   };
 
-  export const Null: PROTO.Serializable<null> = {
+  export const Null: PROTO.Serializable<null, true> = {
+    is: (value: unknown): value is null => value === null,
     *serialize() {},
     *deserialize() {
       return null;
     }
   };
 
-  export const Undefined: PROTO.Serializable<undefined> = {
+  export const Undefined: PROTO.Serializable<undefined, true> = {
+    is: (value: unknown): value is undefined => value === undefined,
     *serialize() {},
     *deserialize() {
       return undefined;
     }
   };
 
-  export const Int8: PROTO.Serializable<number> = {
+  export const Int8: PROTO.Serializable<number, true> = {
+    is: (value: unknown): value is number =>
+      typeof value === 'number' && Number.isInteger(value) && value >= -128 && value <= 127,
     *serialize(value: number, stream: Buffer) {
       stream.data_view.setInt8(stream.reserve(1), value);
     },
@@ -193,7 +202,9 @@ export namespace PROTO {
     }
   };
 
-  export const Int16: PROTO.Serializable<number> = {
+  export const Int16: PROTO.Serializable<number, true> = {
+    is: (value: unknown): value is number =>
+      typeof value === 'number' && Number.isInteger(value) && value >= -32768 && value <= 32767,
     *serialize(value: number, stream: Buffer) {
       stream.data_view.setInt16(stream.reserve(2), value);
     },
@@ -202,7 +213,9 @@ export namespace PROTO {
     }
   };
 
-  export const Int32: PROTO.Serializable<number> = {
+  export const Int32: PROTO.Serializable<number, true> = {
+    is: (value: unknown): value is number =>
+      typeof value === 'number' && Number.isInteger(value) && value >= -2147483648 && value <= 2147483647,
     *serialize(value: number, stream: Buffer) {
       stream.data_view.setInt32(stream.reserve(4), value);
     },
@@ -211,7 +224,9 @@ export namespace PROTO {
     }
   };
 
-  export const UInt8: PROTO.Serializable<number> = {
+  export const UInt8: PROTO.Serializable<number, true> = {
+    is: (value: unknown): value is number =>
+      typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 255,
     *serialize(value: number, stream: Buffer) {
       stream.data_view.setUint8(stream.reserve(1), value);
     },
@@ -220,7 +235,9 @@ export namespace PROTO {
     }
   };
 
-  export const UInt16: PROTO.Serializable<number> = {
+  export const UInt16: PROTO.Serializable<number, true> = {
+    is: (value: unknown): value is number =>
+      typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 65535,
     *serialize(value: number, stream: Buffer) {
       stream.data_view.setUint16(stream.reserve(2), value);
     },
@@ -229,7 +246,9 @@ export namespace PROTO {
     }
   };
 
-  export const UInt32: PROTO.Serializable<number> = {
+  export const UInt32: PROTO.Serializable<number, true> = {
+    is: (value: unknown): value is number =>
+      typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 4294967295,
     *serialize(value: number, stream: Buffer) {
       stream.data_view.setUint32(stream.reserve(4), value);
     },
@@ -238,7 +257,9 @@ export namespace PROTO {
     }
   };
 
-  export const UVarInt32: PROTO.Serializable<number> = {
+  export const UVarInt32: PROTO.Serializable<number, true> = {
+    is: (value: unknown): value is number =>
+      typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 4294967295,
     *serialize(value: number, stream: Buffer) {
       value >>>= 0;
       while (value >= 0x80) {
@@ -260,7 +281,9 @@ export namespace PROTO {
     }
   };
 
-  export const VarInt32: PROTO.Serializable<number> = {
+  export const VarInt32: PROTO.Serializable<number, true> = {
+    is: (value: unknown): value is number =>
+      typeof value === 'number' && Number.isInteger(value) && value >= -2147483648 && value <= 2147483647,
     *serialize(value: number, stream: Buffer) {
       const zigzag = (value << 1) ^ (value >> 31);
       yield* PROTO.UVarInt32.serialize(zigzag, stream);
@@ -271,7 +294,8 @@ export namespace PROTO {
     }
   };
 
-  export const Float32: PROTO.Serializable<number> = {
+  export const Float32: PROTO.Serializable<number, true> = {
+    is: (value: unknown): value is number => typeof value === 'number' && Math.fround(value) === value,
     *serialize(value: number, stream: Buffer): Generator<void, void, void> {
       stream.data_view.setFloat32(stream.reserve(4), value);
     },
@@ -280,7 +304,8 @@ export namespace PROTO {
     }
   };
 
-  export const Float64: PROTO.Serializable<number> = {
+  export const Float64: PROTO.Serializable<number, true> = {
+    is: (value: unknown): value is number => typeof value === 'number',
     *serialize(value: number, stream: Buffer): Generator<void, void, void> {
       stream.data_view.setFloat64(stream.reserve(8), value);
     },
@@ -289,7 +314,8 @@ export namespace PROTO {
     }
   };
 
-  export const String: PROTO.Serializable<string> = {
+  export const String: PROTO.Serializable<string, true> = {
+    is: (value: unknown): value is string => typeof value === 'string',
     *serialize(value: string, stream: Buffer): Generator<void, void, void> {
       yield* PROTO.UVarInt32.serialize(value.length, stream);
       for (let i = 0; i < value.length; i++) {
@@ -308,7 +334,8 @@ export namespace PROTO {
     }
   };
 
-  export const Boolean: PROTO.Serializable<boolean> = {
+  export const Boolean: PROTO.Serializable<boolean, true> = {
+    is: (value: unknown): value is boolean => typeof value === 'boolean',
     *serialize(value: boolean, stream: Buffer): Generator<void, void, void> {
       stream.write(value ? 1 : 0);
     },
@@ -317,7 +344,8 @@ export namespace PROTO {
     }
   };
 
-  export const UInt8Array: PROTO.Serializable<Uint8Array> = {
+  export const UInt8Array: PROTO.Serializable<Uint8Array, true> = {
+    is: (value: unknown): value is Uint8Array => value instanceof Uint8Array,
     *serialize(value: Uint8Array, stream: Buffer): Generator<void, void, void> {
       yield* PROTO.UVarInt32.serialize(value.length, stream);
       stream.write(value);
@@ -327,7 +355,9 @@ export namespace PROTO {
       return stream.read(length);
     }
   };
-  export const Date: PROTO.Serializable<Date> = {
+
+  export const Date: PROTO.Serializable<Date, true> = {
+    is: (value: unknown): value is Date => value instanceof globalThis.Date,
     *serialize(value: Date, stream: Buffer): Generator<void, void, void> {
       yield* PROTO.Float64.serialize(value.getTime(), stream);
     },
@@ -389,8 +419,15 @@ export namespace PROTO {
     };
   }
 
-  export function Optional<T>(s: PROTO.Serializable<T>): PROTO.Serializable<T | undefined> {
+  export function Optional<T, Guard extends boolean>(
+    s: PROTO.Serializable<T, Guard>
+  ): PROTO.Serializable<T | undefined, Guard> {
+    const guard = s.is;
     return {
+      is:
+        guard !== undefined
+          ? (value: unknown): value is T | undefined => value === undefined || guard(value)
+          : undefined,
       *serialize(value: T | undefined, stream: Buffer): Generator<void, void, void> {
         const def = value !== undefined;
         yield* PROTO.Boolean.serialize(def, stream);
@@ -401,7 +438,7 @@ export namespace PROTO {
         if (def) return yield* s.deserialize(stream);
         return undefined;
       }
-    };
+    } as PROTO.Serializable<T | undefined, Guard>;
   }
 
   export function Map<K, V>(kS: PROTO.Serializable<K>, vS: PROTO.Serializable<V>): PROTO.Serializable<Map<K, V>> {
@@ -446,9 +483,15 @@ export namespace PROTO {
     };
   }
 
-  export function Cached<V>(s: PROTO.Serializable<V>, depth: number = 16): PROTO.Serializable<V> {
+  export function Cached<V, Guard extends boolean>(
+    s: PROTO.Serializable<V, Guard>,
+    depth: number = 16
+  ): PROTO.Serializable<V, Guard> {
     const cache = new globalThis.Map<V, Uint8Array>();
+
+    const guard = s.is;
     return {
+      is: guard,
       *serialize(value: V, stream: PROTO.Buffer): Generator<void, void, void> {
         const hit = cache.get(value);
         if (hit !== undefined) {
@@ -469,11 +512,10 @@ export namespace PROTO {
           }
         }
       },
-
       *deserialize(stream: PROTO.Buffer): Generator<void, V, void> {
         return yield* s.deserialize(stream);
       }
-    };
+    } as PROTO.Serializable<V, Guard>;
   }
 }
 
@@ -493,7 +535,7 @@ export namespace NET {
 
   type Listener = (header: Header, fragment: string) => Generator<void, void, void>;
 
-  const Endpoint: PROTO.Serializable<Endpoint> = PROTO.String;
+  const Endpoint: PROTO.Serializable<Endpoint, true> = PROTO.String;
 
   const Meta: PROTO.Serializable<Meta> = PROTO.Object<Meta>({
     guid: PROTO.String,
