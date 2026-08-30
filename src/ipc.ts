@@ -488,10 +488,8 @@ export namespace PROTO {
     depth: number = 16
   ): PROTO.Serializable<V, Guard> {
     const cache = new globalThis.Map<V, Uint8Array>();
-
-    const guard = s.is;
     return {
-      is: guard,
+      is: s.is,
       *serialize(value: V, stream: PROTO.Buffer): Generator<void, void, void> {
         const hit = cache.get(value);
         if (hit !== undefined) {
@@ -516,6 +514,33 @@ export namespace PROTO {
         return yield* s.deserialize(stream);
       }
     } as PROTO.Serializable<V, Guard>;
+  }
+
+  export function Lazy<T, Guard extends boolean>(
+    init: () => PROTO.Serializable<T, Guard>
+  ): PROTO.Serializable<T, Guard> {
+    let cached = undefined;
+    const inner = (): PROTO.Serializable<T, Guard> => (cached ??= init());
+
+    return {
+      get is() {
+        return inner().is;
+      },
+      *serialize(value: T, stream: PROTO.Buffer): Generator<void, void, void> {
+        return yield* inner().serialize(value, stream);
+      },
+      *deserialize(stream: PROTO.Buffer): Generator<void, T, void> {
+        return yield* inner().deserialize(stream);
+      }
+    } as PROTO.Serializable<T, Guard>;
+  }
+
+  export function Recursive<T, Guard extends boolean>(
+    init: (self: PROTO.Serializable<T, Guard>) => PROTO.Serializable<T, Guard>
+  ): PROTO.Serializable<T, Guard> {
+    let target: PROTO.Serializable<T, Guard>;
+    target = init(PROTO.Lazy(() => target));
+    return target;
   }
 }
 
