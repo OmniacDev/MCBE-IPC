@@ -42,8 +42,8 @@ export namespace PROTO {
   }
 
   type Guarded<T, Guard extends boolean> = Guard extends true
-    ? { is(value: unknown): value is NoInfer<T> }
-    : { is?(value: unknown): value is NoInfer<T> };
+    ? { is(value: unknown): value is T }
+    : { is?(value: unknown): value is T };
 
   export type Serializable<T, Guard extends boolean = false> = Serializer<T> & Deserializer<T> & Guarded<T, Guard>;
 
@@ -526,11 +526,11 @@ export namespace PROTO {
       get is() {
         return inner().is;
       },
-      *serialize(value: T, stream: PROTO.Buffer): Generator<void, void, void> {
-        return yield* inner().serialize(value, stream);
+      get serialize() {
+        return inner().serialize;
       },
-      *deserialize(stream: PROTO.Buffer): Generator<void, T, void> {
-        return yield* inner().deserialize(stream);
+      get deserialize() {
+        return inner().deserialize;
       }
     } as PROTO.Serializable<T, Guard>;
   }
@@ -542,6 +542,53 @@ export namespace PROTO {
     target = init(PROTO.Lazy(() => target));
     return target;
   }
+
+  export function Union<T extends readonly any[]>(
+    ...variants: { [K in keyof T]: PROTO.Serializable<T[K], true> }
+  ): PROTO.Serializable<T[number], true> {
+    return {
+      is(value: unknown): value is T {
+        return variants.some(v => v.is(value));
+      },
+      *serialize(value: T, stream: Buffer): Generator<void, void, void> {
+        const idx = variants.findIndex(v => v.is(value));
+        if (idx === -1) throw new Error(`invalid variant value ${globalThis.String(value)}`);
+
+        yield* PROTO.UVarInt32.serialize(idx, stream);
+        yield* variants[idx].serialize(value, stream);
+      },
+      *deserialize(stream: Buffer): Generator<void, T, void> {
+        const idx = yield* PROTO.UVarInt32.deserialize(stream);
+        const variant = variants[idx];
+        if (variant === undefined) throw new Error(`invalid variant index ${idx}`);
+
+        return yield* variant.deserialize(stream);
+      }
+    };
+  }
+
+  export type Any = boolean | number | string | null | undefined; /* | Array<Any> | Map<Any, Any> */
+  export const Any: PROTO.Serializable<Any, true> = PROTO.Recursive(_self =>
+    PROTO.Union(
+      PROTO.Boolean,
+      // numbers
+      PROTO.UVarInt32, // unsinged var-int first, better for positive values
+      PROTO.VarInt32, // then try signed var-int
+      PROTO.Float32, // then try a f32
+      PROTO.Float64, // then just use f64, this works with all JS numbers
+      //
+      PROTO.String,
+      PROTO.Null,
+      // undefined is an explicit variant instead of wrapping the Union in Optional
+      // since that adds an extra layer of variance, wasting a byte.
+      // you can think of an Optional<T> as a Union<T | undefined>,
+      // so wrapping this Union<any> in an Optional would give us a Union<Union<any> | undefined>
+      PROTO.Undefined
+
+      // PROTO.Array(self),
+      // PROTO.Map(self, self)
+    )
+  );
 }
 
 export namespace NET {
