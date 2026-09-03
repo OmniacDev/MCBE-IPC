@@ -45,6 +45,12 @@ export namespace PROTO {
     ? { is(value: unknown): value is T }
     : { is?(value: unknown): value is T };
 
+  namespace Guarded {
+    export function is<T>(s: PROTO.Serializable<T, boolean>, value: unknown): value is T {
+      return s.is?.(value) ?? false;
+    }
+  }
+
   export type Serializable<T, Guard extends boolean = false> = Serializer<T> & Deserializer<T> & Guarded<T, Guard>;
 
   export class Buffer {
@@ -366,33 +372,55 @@ export namespace PROTO {
     }
   };
 
-  export function Object<T extends object>(s: { [K in keyof T]: PROTO.Serializable<T[K]> }): PROTO.Serializable<T> {
+  export function Object<T extends object>(s: { [K in keyof T]: PROTO.Serializable<T[K], true> }): PROTO.Serializable<
+    T,
+    true
+  >;
+  export function Object<T extends object>(s: { [K in keyof T]: PROTO.Serializable<T[K]> }): PROTO.Serializable<T>;
+  export function Object<T extends object, Guard extends boolean>(s: {
+    [K in keyof T]: PROTO.Serializable<T[K], Guard>;
+  }): PROTO.Serializable<T, Guard>;
+  export function Object(s: Record<any, PROTO.Serializable<any>>): PROTO.Serializable<Record<any, any>> {
     return {
-      *serialize(value: T, stream: Buffer): Generator<void, void, void> {
+      is(value: unknown): value is Record<any, any> {
+        return (
+          !globalThis.Array.isArray(value) &&
+          typeof value === 'object' &&
+          value !== null &&
+          globalThis.Object.entries(s).every(([k, v]) => k in value && Guarded.is(v, (value as Record<any, any>)[k]))
+        );
+      },
+      *serialize(value: Record<any, any>, stream: Buffer): Generator<void, void, void> {
         for (const key in s) {
           yield* s[key].serialize(value[key], stream);
         }
       },
-      *deserialize(stream: Buffer): Generator<void, T, void> {
-        const result: Partial<T> = {};
+      *deserialize(stream: Buffer): Generator<void, Record<any, any>, void> {
+        const result: Record<any, any> = {};
         for (const key in s) {
           result[key] = yield* s[key].deserialize(stream);
         }
-        return result as T;
+        return result;
       }
     };
   }
 
-  export function Array<T>(s: PROTO.Serializable<T>): PROTO.Serializable<T[]> {
+  export function Array<T>(s: PROTO.Serializable<T, true>): PROTO.Serializable<T[], true>;
+  export function Array<T>(s: PROTO.Serializable<T>): PROTO.Serializable<T[]>;
+  export function Array<T, Guard extends boolean>(s: PROTO.Serializable<T, Guard>): PROTO.Serializable<T[], Guard>;
+  export function Array(s: PROTO.Serializable<any>): PROTO.Serializable<any[]> {
     return {
-      *serialize(value: T[], stream: Buffer): Generator<void, void, void> {
+      is(value: unknown): value is any[] {
+        return globalThis.Array.isArray(value) && value.every(e => Guarded.is(s, e));
+      },
+      *serialize(value: any[], stream: Buffer): Generator<void, void, void> {
         yield* PROTO.UVarInt32.serialize(value.length, stream);
         for (const item of value) {
           yield* s.serialize(item, stream);
         }
       },
-      *deserialize(stream: Buffer): Generator<void, T[], void> {
-        const result: T[] = [];
+      *deserialize(stream: Buffer): Generator<void, any[], void> {
+        const result: any[] = [];
         const length = yield* PROTO.UVarInt32.deserialize(stream);
         for (let i = 0; i < length; i++) {
           result[i] = yield* s.deserialize(stream);
@@ -402,57 +430,86 @@ export namespace PROTO {
     };
   }
 
-  export function Tuple<T extends any[]>(...s: { [K in keyof T]: PROTO.Serializable<T[K]> }): PROTO.Serializable<T> {
+  export function Tuple<T extends any[]>(
+    ...s: { [K in keyof T]: PROTO.Serializable<T[K], true> }
+  ): PROTO.Serializable<T, true>;
+  export function Tuple<T extends any[]>(...s: { [K in keyof T]: PROTO.Serializable<T[K]> }): PROTO.Serializable<T>;
+  export function Tuple<T extends any[], Guard extends boolean>(
+    ...s: { [K in keyof T]: PROTO.Serializable<T[K], Guard> }
+  ): PROTO.Serializable<T, Guard>;
+  export function Tuple(...s: PROTO.Serializable<any>[]): PROTO.Serializable<any[]> {
     return {
-      *serialize(value: T, stream: Buffer): Generator<void, void, void> {
+      is(value: unknown): value is any[] {
+        return (
+          globalThis.Array.isArray(value) && value.length === s.length && value.every((v, i) => Guarded.is(s[i], v))
+        );
+      },
+      *serialize(value: any[], stream: Buffer): Generator<void, void, void> {
         for (let i = 0; i < s.length; i++) {
           yield* s[i].serialize(value[i], stream);
         }
       },
-      *deserialize(stream: Buffer): Generator<void, T, void> {
+      *deserialize(stream: Buffer): Generator<void, any[], void> {
         const result: any[] = [];
         for (let i = 0; i < s.length; i++) {
           result[i] = yield* s[i].deserialize(stream);
         }
-        return result as T;
+        return result;
       }
     };
   }
 
+  export function Optional<T>(s: PROTO.Serializable<T, true>): PROTO.Serializable<T | undefined, true>;
+  export function Optional<T>(s: PROTO.Serializable<T>): PROTO.Serializable<T | undefined>;
   export function Optional<T, Guard extends boolean>(
     s: PROTO.Serializable<T, Guard>
-  ): PROTO.Serializable<T | undefined, Guard> {
-    const guard = s.is;
+  ): PROTO.Serializable<T | undefined, Guard>;
+  export function Optional(s: PROTO.Serializable<any>): PROTO.Serializable<any | undefined> {
     return {
-      is:
-        guard !== undefined
-          ? (value: unknown): value is T | undefined => value === undefined || guard(value)
-          : undefined,
-      *serialize(value: T | undefined, stream: Buffer): Generator<void, void, void> {
+      is(value: unknown): value is any | undefined {
+        return value === undefined || Guarded.is(s, value);
+      },
+      *serialize(value: any | undefined, stream: Buffer): Generator<void, void, void> {
         const def = value !== undefined;
         yield* PROTO.Boolean.serialize(def, stream);
         if (def) yield* s.serialize(value, stream);
       },
-      *deserialize(stream: Buffer): Generator<void, T | undefined, void> {
+      *deserialize(stream: Buffer): Generator<void, any | undefined, void> {
         const def = yield* PROTO.Boolean.deserialize(stream);
         if (def) return yield* s.deserialize(stream);
         return undefined;
       }
-    } as PROTO.Serializable<T | undefined, Guard>;
+    };
   }
 
-  export function Map<K, V>(kS: PROTO.Serializable<K>, vS: PROTO.Serializable<V>): PROTO.Serializable<Map<K, V>> {
+  export function Map<K, V>(
+    kS: PROTO.Serializable<K, true>,
+    vS: PROTO.Serializable<V, true>
+  ): PROTO.Serializable<Map<K, V>, true>;
+  export function Map<K, V>(kS: PROTO.Serializable<K>, vS: PROTO.Serializable<V>): PROTO.Serializable<Map<K, V>>;
+  export function Map<K, V, Guard extends boolean>(
+    kS: PROTO.Serializable<K, Guard>,
+    vS: PROTO.Serializable<V, Guard>
+  ): PROTO.Serializable<Map<K, V>, Guard>;
+  export function Map(kS: PROTO.Serializable<any>, vS: PROTO.Serializable<any>): PROTO.Serializable<Map<any, any>> {
     return {
-      *serialize(value: Map<K, V>, stream: Buffer): Generator<void, void, void> {
+      is(value: unknown): value is Map<any, any> {
+        if (!(value instanceof globalThis.Map)) return false;
+        for (const [k, v] of value) {
+          if (!Guarded.is(kS, k) || !Guarded.is(vS, v)) return false;
+        }
+        return true;
+      },
+      *serialize(value: Map<any, any>, stream: Buffer): Generator<void, void, void> {
         yield* PROTO.UVarInt32.serialize(value.size, stream);
         for (const [k, v] of value) {
           yield* kS.serialize(k, stream);
           yield* vS.serialize(v, stream);
         }
       },
-      *deserialize(stream: Buffer): Generator<void, Map<K, V>, void> {
+      *deserialize(stream: Buffer): Generator<void, Map<any, any>, void> {
         const size = yield* PROTO.UVarInt32.deserialize(stream);
-        const result = new globalThis.Map<K, V>();
+        const result = new globalThis.Map<any, any>();
         for (let i = 0; i < size; i++) {
           const k = yield* kS.deserialize(stream);
           const v = yield* vS.deserialize(stream);
@@ -463,17 +520,27 @@ export namespace PROTO {
     };
   }
 
-  export function Set<V>(s: PROTO.Serializable<V>): PROTO.Serializable<Set<V>> {
+  export function Set<V>(s: PROTO.Serializable<V, true>): PROTO.Serializable<Set<V>, true>;
+  export function Set<V>(s: PROTO.Serializable<V>): PROTO.Serializable<Set<V>>;
+  export function Set<V, Guard extends boolean>(s: PROTO.Serializable<V, Guard>): PROTO.Serializable<Set<V>, Guard>;
+  export function Set(s: PROTO.Serializable<any>): PROTO.Serializable<Set<any>> {
     return {
-      *serialize(set: Set<V>, stream: Buffer): Generator<void, void, void> {
+      is(value: unknown): value is Set<any> {
+        if (!(value instanceof globalThis.Set)) return false;
+        for (const v of value) {
+          if (!Guarded.is(s, v)) return false;
+        }
+        return true;
+      },
+      *serialize(set: Set<any>, stream: Buffer): Generator<void, void, void> {
         yield* PROTO.UVarInt32.serialize(set.size, stream);
         for (const v of set) {
           yield* s.serialize(v, stream);
         }
       },
-      *deserialize(stream: Buffer): Generator<void, Set<V>, void> {
+      *deserialize(stream: Buffer): Generator<void, Set<any>, void> {
         const size = yield* PROTO.UVarInt32.deserialize(stream);
-        const result = new globalThis.Set<V>();
+        const result = new globalThis.Set<any>();
         for (let i = 0; i < size; i++) {
           const v = yield* s.deserialize(stream);
           result.add(v);
@@ -483,14 +550,19 @@ export namespace PROTO {
     };
   }
 
+  export function Cached<V>(s: PROTO.Serializable<V, true>, depth?: number): PROTO.Serializable<V, true>;
+  export function Cached<V>(s: PROTO.Serializable<V>, depth?: number): PROTO.Serializable<V>;
   export function Cached<V, Guard extends boolean>(
     s: PROTO.Serializable<V, Guard>,
-    depth: number = 16
-  ): PROTO.Serializable<V, Guard> {
-    const cache = new globalThis.Map<V, Uint8Array>();
+    depth?: number
+  ): PROTO.Serializable<V, Guard>;
+  export function Cached(s: PROTO.Serializable<any>, depth: number = 16): PROTO.Serializable<any> {
+    const cache = new globalThis.Map<any, Uint8Array>();
     return {
-      is: s.is,
-      *serialize(value: V, stream: PROTO.Buffer): Generator<void, void, void> {
+      get is() {
+        return s.is;
+      },
+      *serialize(value: any, stream: PROTO.Buffer): Generator<void, void, void> {
         const hit = cache.get(value);
         if (hit !== undefined) {
           stream.write(hit);
@@ -510,17 +582,17 @@ export namespace PROTO {
           }
         }
       },
-      *deserialize(stream: PROTO.Buffer): Generator<void, V, void> {
+      *deserialize(stream: PROTO.Buffer): Generator<void, any, void> {
         return yield* s.deserialize(stream);
       }
-    } as PROTO.Serializable<V, Guard>;
+    };
   }
 
   export function Lazy<T, Guard extends boolean>(
     init: () => PROTO.Serializable<T, Guard>
   ): PROTO.Serializable<T, Guard> {
-    let cached = undefined;
-    const inner = (): PROTO.Serializable<T, Guard> => (cached ??= init());
+    let cached: PROTO.Serializable<any> | undefined = undefined;
+    const inner = () => (cached ??= init());
 
     return {
       get is() {
@@ -539,7 +611,7 @@ export namespace PROTO {
     init: (self: PROTO.Serializable<T, Guard>) => PROTO.Serializable<T, Guard>
   ): PROTO.Serializable<T, Guard> {
     let target: PROTO.Serializable<T, Guard>;
-    target = init(PROTO.Lazy(() => target));
+    target = init(PROTO.Lazy<T, Guard>(() => target));
     return target;
   }
 
@@ -567,8 +639,8 @@ export namespace PROTO {
     };
   }
 
-  export type Any = boolean | number | string | null | undefined; /* | Array<Any> | Map<Any, Any> */
-  export const Any: PROTO.Serializable<Any, true> = PROTO.Recursive(_self =>
+  export type Any = boolean | number | string | null | undefined | Array<Any> | Set<Any> | Map<Any, Any>;
+  export const Any: PROTO.Serializable<Any, true> = PROTO.Recursive(self =>
     PROTO.Union(
       PROTO.Boolean,
       // numbers
@@ -583,12 +655,32 @@ export namespace PROTO {
       // since that adds an extra layer of variance, wasting a byte.
       // you can think of an Optional<T> as a Union<T | undefined>,
       // so wrapping this Union<any> in an Optional would give us a Union<Union<any> | undefined>
-      PROTO.Undefined
+      PROTO.Undefined,
 
-      // PROTO.Array(self),
-      // PROTO.Map(self, self)
+      PROTO.Array(self),
+      PROTO.Set(self),
+      PROTO.Map(self, self)
     )
   );
+
+  export function Checked<T>(s: PROTO.Serializable<T, true>): PROTO.Serializable<T, true> {
+    return {
+      get is() {
+        return s.is;
+      },
+      *serialize(value: T, stream: Buffer): Generator<void, void, void> {
+        if (!s.is(value)) throw new Error(`invalid input value ${globalThis.String(value)}`);
+
+        yield* s.serialize(value, stream);
+      },
+      *deserialize(stream: Buffer): Generator<void, T, void> {
+        const value = yield* s.deserialize(stream);
+
+        if (!s.is(value)) throw new Error(`invalid output value ${globalThis.String(value)}`);
+        return value;
+      }
+    };
+  }
 }
 
 export namespace NET {
@@ -607,18 +699,22 @@ export namespace NET {
 
   type Listener = (header: Header, fragment: string) => Generator<void, void, void>;
 
-  const Endpoint: PROTO.Serializable<Endpoint, true> = PROTO.String;
+  const Endpoint: PROTO.Serializable<Endpoint, true> = PROTO.Checked(PROTO.String);
 
-  const Meta: PROTO.Serializable<Meta> = PROTO.Object<Meta>({
-    guid: PROTO.String,
-    signature: PROTO.String
-  });
+  const Meta: PROTO.Serializable<Meta, true> = PROTO.Checked(
+    PROTO.Object<Meta>({
+      guid: PROTO.String,
+      signature: PROTO.String
+    })
+  );
 
-  const Header: PROTO.Serializable<Header> = PROTO.Object<Header>({
-    meta: Meta,
-    index: PROTO.UVarInt32,
-    final: PROTO.Boolean
-  });
+  const Header: PROTO.Serializable<Header, true> = PROTO.Checked(
+    PROTO.Object<Header>({
+      meta: Meta,
+      index: PROTO.UVarInt32,
+      final: PROTO.Boolean
+    })
+  );
 
   const LISTENERS: Map<Endpoint, Array<Listener>> = new Map<Endpoint, Array<Listener>>();
 

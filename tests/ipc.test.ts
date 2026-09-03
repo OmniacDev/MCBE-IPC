@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import IPC, { NET, PROTO } from '../src/ipc';
 import { system } from '@minecraft/server';
 
@@ -202,5 +202,277 @@ describe('net', () => {
         }
       })()
     );
+  });
+});
+
+describe('union', () => {
+  it('round-trips each variant correctly', () => {
+    const NumOrStrOrBool = PROTO.Union(PROTO.Float64, PROTO.String, PROTO.Boolean);
+
+    for (const value of [42, -3.5, 'hello', true, false]) {
+      const stream = new PROTO.Buffer();
+      system.runJob(NumOrStrOrBool.serialize(value as number | string | boolean, stream));
+
+      let result;
+      system.runJob(
+        (function* () {
+          result = yield* NumOrStrOrBool.deserialize(stream);
+        })()
+      );
+
+      expect(result).toEqual(value);
+    }
+  });
+
+  it('is() matches values belonging to any variant and rejects others', () => {
+    const NumOrStr = PROTO.Union(PROTO.Float64, PROTO.String);
+
+    expect(NumOrStr.is(42)).toBe(true);
+    expect(NumOrStr.is('hi')).toBe(true);
+    expect(NumOrStr.is(true)).toBe(false);
+    expect(NumOrStr.is({})).toBe(false);
+    expect(NumOrStr.is(undefined)).toBe(false);
+  });
+
+  it('routes to the first matching variant when ranges overlap', () => {
+    const spy = vi.spyOn(PROTO.VarInt32, 'serialize');
+    const IntUnion = PROTO.Union(PROTO.UVarInt32, PROTO.VarInt32);
+
+    const stream = new PROTO.Buffer();
+    system.runJob(IntUnion.serialize(5, stream));
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('throws when serializing a value that matches no variant', () => {
+    const NumOrStr = PROTO.Union(PROTO.Float64, PROTO.String);
+    const stream = new PROTO.Buffer();
+
+    expect(() => system.runJob(NumOrStr.serialize({} as any, stream))).toThrow();
+  });
+
+  it('throws when deserializing an out-of-range variant index', () => {
+    const NumOrStr = PROTO.Union(PROTO.Float64, PROTO.String);
+
+    const stream = new PROTO.Buffer();
+    system.runJob(PROTO.UVarInt32.serialize(99, stream));
+
+    expect(() =>
+      system.runJob(
+        (function* () {
+          yield* NumOrStr.deserialize(stream);
+        })()
+      )
+    ).toThrow();
+  });
+});
+
+describe('checked', () => {
+  it('passes through valid values unchanged', () => {
+    const checked = PROTO.Checked(PROTO.String);
+    const stream = new PROTO.Buffer();
+
+    system.runJob(checked.serialize('hello', stream));
+
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* checked.deserialize(stream);
+      })()
+    );
+
+    expect(result).toEqual('hello');
+  });
+
+  it('throws on serialize when the input fails is()', () => {
+    const checked = PROTO.Checked(PROTO.String);
+    const stream = new PROTO.Buffer();
+
+    expect(() => system.runJob(checked.serialize(42 as any, stream))).toThrow();
+  });
+
+  it('throws on deserialize when the output fails is()', () => {
+    const misbehaving: PROTO.Serializable<string, true> = {
+      is: (v): v is string => typeof v === 'string',
+      *serialize(_value, stream) {
+        yield* PROTO.Float64.serialize(0, stream);
+      },
+      *deserialize(stream) {
+        yield* PROTO.Float64.deserialize(stream);
+        return 42 as unknown as string;
+      }
+    };
+    const checked = PROTO.Checked(misbehaving);
+    const stream = new PROTO.Buffer();
+    system.runJob(checked.serialize('irrelevant', stream));
+
+    expect(() =>
+      system.runJob(
+        (function* () {
+          yield* checked.deserialize(stream);
+        })()
+      )
+    ).toThrow();
+  });
+});
+
+describe('lazy / recursive', () => {
+  it('only resolves the thunk once, even across multiple calls', () => {
+    let calls = 0;
+    const lazy = PROTO.Lazy(() => {
+      calls++;
+      return PROTO.String;
+    });
+
+    const s1 = new PROTO.Buffer();
+    system.runJob(lazy.serialize('a', s1));
+    const s2 = new PROTO.Buffer();
+    system.runJob(lazy.serialize('b', s2));
+    lazy.is('c');
+
+    expect(calls).toBe(1);
+  });
+
+  it('a self-reference used directly as a Union variant works (no wrapping composite)', () => {
+    type Loose = number | string;
+    const value: Loose = 42;
+    const Loose: PROTO.Serializable<Loose, true> = PROTO.Recursive<Loose, true>(_self =>
+      PROTO.Union(PROTO.Float64, PROTO.String)
+    );
+
+    const stream = new PROTO.Buffer();
+    system.runJob(Loose.serialize(value, stream));
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* Loose.deserialize(stream);
+      })()
+    );
+    expect(result).toEqual(value);
+  });
+
+  it('recursive Array(self) / Map(self, self) now construct and round-trip correctly', () => {
+    const value: PROTO.Any = [
+      1,
+      'two',
+      true,
+      null,
+      undefined,
+      new globalThis.Map<PROTO.Any, PROTO.Any>([
+        ['nested', [1, 2, 3]],
+        [4, new globalThis.Map<PROTO.Any, PROTO.Any>([['deep', true]])]
+      ])
+    ];
+
+    const stream = new PROTO.Buffer();
+    system.runJob(PROTO.Any.serialize(value, stream));
+
+    let result: PROTO.Any;
+    system.runJob(
+      (function* () {
+        result = yield* PROTO.Any.deserialize(stream);
+      })()
+    );
+
+    expect(result!).toEqual(value);
+  });
+});
+
+describe('PROTO.Any', () => {
+  it('round-trips every primitive variant', () => {
+    for (const value of [true, false, 42, -17, 3.14, 'hello', null, undefined]) {
+      const stream = new PROTO.Buffer();
+      system.runJob(PROTO.Any.serialize(value as PROTO.Any, stream));
+
+      let result;
+      system.runJob(
+        (function* () {
+          result = yield* PROTO.Any.deserialize(stream);
+        })()
+      );
+
+      expect(result).toBe(value);
+    }
+  });
+
+  it('is() accepts every valid variant and rejects unsupported types', () => {
+    expect(PROTO.Any.is(42)).toBe(true);
+    expect(PROTO.Any.is('str')).toBe(true);
+    expect(PROTO.Any.is(null)).toBe(true);
+    expect(PROTO.Any.is(undefined)).toBe(true);
+    expect(PROTO.Any.is(Symbol('x'))).toBe(false);
+  });
+});
+
+describe('Guard inference and backward compat', () => {
+  it('Object() fully inferred tracks Guard and composes into Union', () => {
+    const Meta = PROTO.Object({ guid: PROTO.String, signature: PROTO.String });
+    const MetaOrString = PROTO.Union(Meta, PROTO.String);
+
+    const value = { guid: 'a', signature: 'b' };
+    const stream = new PROTO.Buffer();
+    system.runJob(MetaOrString.serialize(value, stream));
+
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* MetaOrString.deserialize(stream);
+      })()
+    );
+
+    expect(result).toEqual(value);
+  });
+
+  it('Tuple() fully inferred tracks Guard and composes into Union', () => {
+    const Pair = PROTO.Tuple(PROTO.String, PROTO.UVarInt32);
+    const PairOrBool = PROTO.Union(Pair, PROTO.Boolean);
+
+    const value: [string, number] = ['a', 5];
+    const stream = new PROTO.Buffer();
+    system.runJob(PairOrBool.serialize(value, stream));
+
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* PairOrBool.deserialize(stream);
+      })()
+    );
+
+    expect(result).toEqual(value);
+  });
+
+  it('explicit-T Object<T>({...}) still round-trips (old style)', () => {
+    type Meta = { guid: string; signature: string };
+    const Meta = PROTO.Object<Meta>({ guid: PROTO.String, signature: PROTO.String });
+
+    const value: Meta = { guid: 'a', signature: 'b' };
+    const stream = new PROTO.Buffer();
+    system.runJob(Meta.serialize(value, stream));
+
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* Meta.deserialize(stream);
+      })()
+    );
+
+    expect(result).toEqual(value);
+  });
+
+  it('explicit-T Tuple<T>(...) still round-trips (old style)', () => {
+    const Pair = PROTO.Tuple<[string, number]>(PROTO.String, PROTO.UVarInt32);
+
+    const value: [string, number] = ['x', 9];
+    const stream = new PROTO.Buffer();
+    system.runJob(Pair.serialize(value, stream));
+
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* Pair.deserialize(stream);
+      })()
+    );
+
+    expect(result).toEqual(value);
   });
 });
