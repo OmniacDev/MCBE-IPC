@@ -684,7 +684,8 @@ export namespace PROTO {
     };
   }
 
-  export type Any = boolean | number | string | null | undefined | Array<Any> | Set<Any> | Map<Any, Any>;
+  export type Any =
+    boolean | number | string | null | undefined | Array<Any> | Set<Any> | Map<Any, Any> | { [key: string]: Any };
   export const Any: PROTO.Serializable<Any, true> = PROTO.Recursive(self =>
     PROTO.Union(
       PROTO.Boolean,
@@ -697,7 +698,8 @@ export namespace PROTO {
       PROTO.Undefined,
       PROTO.Array(self),
       PROTO.Set(self),
-      PROTO.Map(self, self)
+      PROTO.Map(self, self),
+      PROTO.Record(self)
     )
   );
 
