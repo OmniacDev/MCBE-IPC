@@ -476,3 +476,175 @@ describe('Guard inference and backward compat', () => {
     expect(result).toEqual(value);
   });
 });
+
+describe('literal', () => {
+  it('round-trips and writes zero bytes', () => {
+    const Foo = PROTO.Literal('foo');
+
+    const stream = new PROTO.Buffer();
+    system.runJob(Foo.serialize('foo', stream));
+
+    expect(stream.to_uint8array().length).toBe(0);
+
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* Foo.deserialize(stream);
+      })()
+    );
+
+    expect(result).toEqual('foo');
+  });
+
+  it('is() only accepts the exact value', () => {
+    const Foo = PROTO.Literal('foo');
+
+    expect(Foo.is('foo')).toBe(true);
+    expect(Foo.is('bar')).toBe(false);
+    expect(Foo.is(42)).toBe(false);
+
+    const Five = PROTO.Literal(5);
+    expect(Five.is(5)).toBe(true);
+    expect(Five.is('5')).toBe(false);
+  });
+
+  it('tags otherwise-overlapping Object variants so Union can disambiguate them', () => {
+    const Click = PROTO.Object({ type: PROTO.Literal('click' as const), x: PROTO.Float64, y: PROTO.Float64 });
+    const Move = PROTO.Object({
+      type: PROTO.Literal('move' as const),
+      x: PROTO.Float64,
+      y: PROTO.Float64,
+      z: PROTO.Float64
+    });
+    const Event = PROTO.Union(Click, Move);
+
+    const move = { type: 'move' as const, x: 1, y: 2, z: 3 };
+
+    // without a tag, Click.is(move) would be true (it only checks its own keys exist),
+    // so Union would wrongly pick Click first and silently drop `z`.
+    expect(Click.is(move)).toBe(false);
+    expect(Move.is(move)).toBe(true);
+
+    const stream = new PROTO.Buffer();
+    system.runJob(Event.serialize(move, stream));
+
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* Event.deserialize(stream);
+      })()
+    );
+
+    expect(result).toEqual(move);
+  });
+});
+
+describe('record', () => {
+  it('round-trips a plain-object dictionary', () => {
+    const Scores = PROTO.Record<number>(PROTO.UVarInt32);
+    const value = { alice: 10, bob: 20, carol: 30 };
+
+    const stream = new PROTO.Buffer();
+    system.runJob(Scores.serialize(value, stream));
+
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* Scores.deserialize(stream);
+      })()
+    );
+
+    expect(result).toEqual(value);
+  });
+
+  it('is() validates every value and rejects arrays', () => {
+    const Scores = PROTO.Record<number>(PROTO.UVarInt32);
+
+    expect(Scores.is({ a: 1, b: 2 })).toBe(true);
+    expect(Scores.is({ a: 1, b: 'nope' })).toBe(false);
+    expect(Scores.is([1, 2, 3])).toBe(false);
+    expect(Scores.is(null)).toBe(false);
+  });
+
+  it('round-trips with numeric-looking keys (JS coerces object keys to strings regardless)', () => {
+    const ById = PROTO.Record<string>(PROTO.String);
+    const value = { 1: 'a', 2: 'b' };
+
+    const stream = new PROTO.Buffer();
+    system.runJob(ById.serialize(value, stream));
+
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* ById.deserialize(stream);
+      })()
+    );
+
+    expect(result).toEqual(value);
+  });
+});
+
+describe('transform', () => {
+  class Vector2 {
+    constructor(
+      public x: number,
+      public y: number
+    ) {}
+  }
+
+  it('round-trips by mapping through a base serializer', () => {
+    const Vector2Proto = PROTO.Transform(
+      PROTO.Object({ x: PROTO.Float64, y: PROTO.Float64 }),
+      (v: Vector2) => ({ x: v.x, y: v.y }),
+      o => new Vector2(o.x, o.y),
+      (v): v is Vector2 => v instanceof Vector2
+    );
+
+    const value = new Vector2(1, 2);
+    const stream = new PROTO.Buffer();
+    system.runJob(Vector2Proto.serialize(value, stream));
+
+    let result: Vector2 | undefined;
+    system.runJob(
+      (function* () {
+        result = yield* Vector2Proto.deserialize(stream);
+      })()
+    );
+
+    expect(result).toBeInstanceOf(Vector2);
+    expect(result).toEqual(value);
+  });
+
+  it('is() reflects the supplied guard, not the base serializer', () => {
+    const Vector2Proto = PROTO.Transform(
+      PROTO.Object({ x: PROTO.Float64, y: PROTO.Float64 }),
+      (v: Vector2) => ({ x: v.x, y: v.y }),
+      o => new Vector2(o.x, o.y),
+      (v): v is Vector2 => v instanceof Vector2
+    );
+
+    expect(Vector2Proto.is(new Vector2(1, 2))).toBe(true);
+    expect(Vector2Proto.is({ x: 1, y: 2 })).toBe(false); // plain object, not a Vector2 instance
+  });
+
+  it('works without a guard when Guard is not needed', () => {
+    const Doubled = PROTO.Transform(
+      PROTO.UVarInt32,
+      (n: number) => n / 2,
+      n => n * 2
+    );
+
+    const stream = new PROTO.Buffer();
+    system.runJob(Doubled.serialize(10, stream));
+
+    let result;
+    system.runJob(
+      (function* () {
+        result = yield* Doubled.deserialize(stream);
+      })()
+    );
+
+    expect(result).toEqual(10);
+    expect(Doubled.is).toBeUndefined();
+  });
+});

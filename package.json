@@ -19,7 +19,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest",
     "bench": "vitest bench",
     "format": "prettier --write src",

@@ -550,6 +550,41 @@ export namespace PROTO {
     };
   }
 
+  export function Record<V>(vS: PROTO.Serializable<V, true>): PROTO.Serializable<Record<string, V>, true>;
+  export function Record<V>(vS: PROTO.Serializable<V>): PROTO.Serializable<Record<string, V>>;
+  export function Record<V, Guard extends boolean>(
+    vS: PROTO.Serializable<V, Guard>
+  ): PROTO.Serializable<Record<string, V>, Guard>;
+  export function Record(vS: PROTO.Serializable<any>): PROTO.Serializable<Record<string, any>> {
+    return {
+      is(value: unknown): value is Record<string, any> {
+        return (
+          !globalThis.Array.isArray(value) &&
+          typeof value === 'object' &&
+          value !== null &&
+          globalThis.Object.values(value).every(v => Guarded.is(vS, v))
+        );
+      },
+      *serialize(value: Record<string, any>, stream: Buffer): Generator<void, void, void> {
+        const entries = globalThis.Object.entries(value);
+        yield* PROTO.UVarInt32.serialize(entries.length, stream);
+        for (const [k, v] of entries) {
+          yield* PROTO.String.serialize(k, stream);
+          yield* vS.serialize(v, stream);
+        }
+      },
+      *deserialize(stream: Buffer): Generator<void, Record<string, any>, void> {
+        const size = yield* PROTO.UVarInt32.deserialize(stream);
+        const result: Record<string, any> = {};
+        for (let i = 0; i < size; i++) {
+          const k = yield* PROTO.String.deserialize(stream);
+          result[k] = yield* vS.deserialize(stream);
+        }
+        return result;
+      }
+    };
+  }
+
   export function Cached<V>(s: PROTO.Serializable<V, true>, depth?: number): PROTO.Serializable<V, true>;
   export function Cached<V>(s: PROTO.Serializable<V>, depth?: number): PROTO.Serializable<V>;
   export function Cached<V, Guard extends boolean>(
@@ -615,6 +650,16 @@ export namespace PROTO {
     return target;
   }
 
+  export function Literal<T extends string | number | boolean>(value: T): PROTO.Serializable<T, true> {
+    return {
+      is: (v: unknown): v is T => v === value,
+      *serialize() {},
+      *deserialize() {
+        return value;
+      }
+    };
+  }
+
   export function Union<T extends readonly any[]>(
     ...variants: { [K in keyof T]: PROTO.Serializable<T[K], true> }
   ): PROTO.Serializable<T[number], true> {
@@ -643,20 +688,13 @@ export namespace PROTO {
   export const Any: PROTO.Serializable<Any, true> = PROTO.Recursive(self =>
     PROTO.Union(
       PROTO.Boolean,
-      // numbers
       PROTO.UVarInt32, // unsinged var-int first, better for positive values
       PROTO.VarInt32, // then try signed var-int
       PROTO.Float32, // then try a f32
       PROTO.Float64, // then just use f64, this works with all JS numbers
-      //
       PROTO.String,
       PROTO.Null,
-      // undefined is an explicit variant instead of wrapping the Union in Optional
-      // since that adds an extra layer of variance, wasting a byte.
-      // you can think of an Optional<T> as a Union<T | undefined>,
-      // so wrapping this Union<any> in an Optional would give us a Union<Union<any> | undefined>
       PROTO.Undefined,
-
       PROTO.Array(self),
       PROTO.Set(self),
       PROTO.Map(self, self)
@@ -678,6 +716,35 @@ export namespace PROTO {
 
         if (!s.is(value)) throw new Error(`invalid output value ${globalThis.String(value)}`);
         return value;
+      }
+    };
+  }
+
+  export function Transform<A, B>(
+    base: PROTO.Serializable<A>,
+    to: (value: B) => A,
+    from: (value: A) => B,
+    is: (value: unknown) => value is B
+  ): PROTO.Serializable<B, true>;
+  export function Transform<A, B>(
+    base: PROTO.Serializable<A>,
+    to: (value: B) => A,
+    from: (value: A) => B
+  ): PROTO.Serializable<B>;
+  export function Transform(
+    base: PROTO.Serializable<any>,
+    to: (value: any) => any,
+    from: (value: any) => any,
+    is?: (value: unknown) => boolean
+  ): PROTO.Serializable<any> {
+    return {
+      is: is as (value: unknown) => value is any,
+      *serialize(value: any, stream: Buffer): Generator<void, void, void> {
+        yield* base.serialize(to(value), stream);
+      },
+      *deserialize(stream: Buffer): Generator<void, any, void> {
+        const a = yield* base.deserialize(stream);
+        return from(a);
       }
     };
   }
