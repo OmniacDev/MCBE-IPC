@@ -14,6 +14,13 @@
   "homepage": "https://github.com/OmniacDev/MCBE-IPC",
   "type": "module",
   "main": "dist/ipc.js",
+  "exports": {
+    ".": {
+      "types": "./dist/ipc.d.ts",
+      "import": "./dist/ipc.js",
+      "default": "./dist/ipc.js"
+    }
+  },
   "types": "dist/ipc.d.ts",
   "files": [
     "dist"
